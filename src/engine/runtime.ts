@@ -63,6 +63,8 @@ interface Task {
   finish(): void;
 }
 
+type Fn0 = () => void;
+
 export class Runtime {
   time = 0;
   private frames: Fn[] = [];
@@ -989,9 +991,29 @@ export class Runtime {
     return p;
   }
 
+  /** ParallelInteractiveItem (m_RunDoTweenOfChildItems) -> closing actions of its parts. */
+  private groupEnd = new Map<GO, Fn0[]>();
+
+  /** Runs `f` now, or when the part's ParallelInteractiveItem group is done. */
+  private afterGroup(part: GO, f: Fn0): void {
+    const par = part.parent;
+    const pc = par?.comp('ParallelInteractiveItem');
+    if (par && pc && num(pc.m_RunDoTweenOfChildItems) && this.tasks.some((t) => t.key?.startsWith(`${par.id}:`) && !t.done)) {
+      const list = this.groupEnd.get(par) ?? [];
+      list.push(f);
+      this.groupEnd.set(par, list);
+    } else f();
+  }
+
   /** Drop the tasks still waiting (e.g. the tools the player did not pick). */
   private dropTasks(keys?: Set<string>): void {
     for (const t of [...this.tasks]) if (!keys || (t.key && keys.has(t.key))) t.finish();
+    if (!keys) {
+      // a step ending with a group still open: its tools are put away all the same
+      const later = [...this.groupEnd.values()].flat();
+      this.groupEnd.clear();
+      for (const f of later) f();
+    }
   }
 
   private endTask(task: Task, resolve: () => void): void {
@@ -1066,6 +1088,12 @@ export class Runtime {
               this.triggers++;
               void this.runList(t.children);
               // targets switched on by this trigger join the list on the next frame
+              // DragColliderOptions: the targets are alternatives, the first one hit does the job
+              // (its own actions put the tool away)
+              if (c._options) {
+                void this.sleep(0.05).then(() => task.finish());
+                return;
+              }
               if (c.m_DoTaskDoneOnTrigger) void this.sleep(0.05).then(() => allDone() && task.finish());
             }
           }
@@ -1133,7 +1161,7 @@ export class Runtime {
             if (task.done) return;
             fin();
             const sp = so ? this.running.get(key(so)) : undefined;
-            void (sp ?? Promise.resolve()).then(() => this.runHolder(close));
+            void (sp ?? Promise.resolve()).then(() => this.afterGroup(g, () => void this.runHolder(close)));
           };
         }
         const seen = new Set<number>();
@@ -1177,7 +1205,9 @@ export class Runtime {
           task.finish = () => {
             if (task.done) return;
             fin();
-            void this.runHolder(close);
+            // in a ParallelInteractiveItem the tool is shared (e.g. scratch + slots with the same
+            // spray): it is put away when the whole group is done, not when this part is
+            this.afterGroup(g, () => void this.runHolder(close));
           };
         }
         const cards = refs(c.m_ListScratchCard).map((r) => this.cards.get(key(r))).filter((x): x is ScratchCard => !!x);
@@ -1199,6 +1229,8 @@ export class Runtime {
         // the scrubbing effects (foam, particles, sounds) are on while the tool rubs the surface
         // and go off a moment after it stops or leaves it (TweenOnScratchingCard begin/end)
         let lastHit = -1;
+        let best = 0;
+        let gainAt = this.time;
         const endScrub = () => {
           if (!scrubbing) return;
           scrubbing = false;
@@ -1248,7 +1280,14 @@ export class Runtime {
             half = true;
             void this.runHolder(c.m_TweenOnHalfHolder);
           }
-          if (cards.every((k) => k.progress >= need(k))) {
+          // safety net: still rubbing, mostly clean, and nothing more comes off (the last bits are
+          // where this mask approximation and the original's differ): the job counts as done
+          if (avg > best + 0.002) {
+            best = avg;
+            gainAt = this.time;
+          }
+          const stalled = avg >= 0.75 && this.time - gainAt > 1.5;
+          if (stalled || cards.every((k) => k.progress >= need(k))) {
             cards.forEach((k) => k.complete());
             void this.runHolder(c.actionHolder);
             void this.runHolder(c.m_OnDoneScratch);
@@ -1291,7 +1330,13 @@ export class Runtime {
                 }),
               );
           }
-        void Promise.all(subs).then(task.finish);
+        void Promise.all(subs).then(() => {
+          // m_RunDoTweenOfChildItems: the parts' closing tweens (tools put away) run now
+          const later = this.groupEnd.get(g) ?? [];
+          this.groupEnd.delete(g);
+          for (const f of later) f();
+          task.finish();
+        });
         return task;
       }
       case 'ChooseOption':

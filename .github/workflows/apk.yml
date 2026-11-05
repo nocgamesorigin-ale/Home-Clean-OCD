@@ -1,0 +1,70 @@
+# Wrap the web build in a Capacitor Android shell and build an APK.
+# Capacitor is installed only here (--no-save), so package.json stays untouched.
+# Output: an artifact on every run, and the rolling pre-release "apk-latest" with the APK attached.
+# The APK is debug-signed (installable for testing); a store build needs a release keystore.
+name: Android APK
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 21
+
+      # the Ubuntu runner ships the Android SDK; just point Gradle at it
+      - run: echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> "$GITHUB_ENV"
+      - run: npm ci
+      - run: npm run build
+      - run: npm install --no-save @capacitor/core@7 @capacitor/cli@7 @capacitor/android@7
+
+      - name: Create the Android project
+        run: |
+          npx cap add android
+          # portrait only, full screen
+          sed -i 's/<activity/<activity android:screenOrientation="portrait"/' android/app/src/main/AndroidManifest.xml
+          # the game's own launcher icon (public/icon.png, 512 px) at every density
+          rm -rf android/app/src/main/res/mipmap-anydpi-v26
+          for pair in mdpi:48 hdpi:72 xhdpi:96 xxhdpi:144 xxxhdpi:192; do
+            d=${pair%%:*}; s=${pair##*:}
+            dir=android/app/src/main/res/mipmap-$d
+            convert public/icon.png -resize ${s}x${s} $dir/ic_launcher.png 2>/dev/null || cp public/icon.png $dir/ic_launcher.png
+            cp $dir/ic_launcher.png $dir/ic_launcher_round.png
+            rm -f $dir/ic_launcher_foreground.png
+          done
+          npx cap sync android
+
+      - name: Build APK
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon
+          cp app/build/outputs/apk/debug/app-debug.apk ../home-clean-ocd.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: home-clean-ocd-apk
+          path: home-clean-ocd.apk
+
+      - name: Publish to the "apk-latest" pre-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete apk-latest --yes --cleanup-tag || true
+          gh release create apk-latest home-clean-ocd.apk --prerelease \
+            --title "Home Clean OCD APK (latest build)" \
+            --notes "Debug APK built from ${GITHUB_SHA::7}. Web version: https://${GITHUB_REPOSITORY_OWNER}.github.io/${GITHUB_REPOSITORY#*/}/"

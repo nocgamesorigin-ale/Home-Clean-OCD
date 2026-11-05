@@ -1,0 +1,6 @@
+{
+  "appId": "com.nocgames.homecleanocd",
+  "appName": "Home Clean OCD",
+  "webDir": "dist",
+  "android": { "backgroundColor": "#1d1b22" }
+}
