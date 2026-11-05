@@ -1,0 +1,15 @@
+Chainsaw_skel__0bd2213e__Chainsaw.webp
+size:256,276
+filter:Linear,Linear
+pma:true
+saw_blade
+bounds:2,176,98,104
+rotate:90
+saw_blade_1
+bounds:108,171,103,114
+offsets:0,2,103,116
+rotate:90
+saw_body
+bounds:2,2,167,251
+offsets:1,1,247,253
+rotate:90

@@ -1,0 +1,13 @@
+Poke_the_beehive_skel__Poke_the_beehive.webp
+size:940,524
+filter:Linear,Linear
+pma:true
+Dirt_Scrape
+bounds:791,202,146,319
+beehive
+bounds:2,31,490,577
+offsets:8,30,498,611
+rotate:90
+stick
+bounds:581,2,208,519
+offsets:1,1,210,522

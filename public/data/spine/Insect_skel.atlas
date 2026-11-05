@@ -1,0 +1,15 @@
+Insect_skel__Insect.webp
+size:312,112
+filter:Linear,Linear
+pma:true
+centipede
+bounds:130,3,106,103
+rotate:90
+centipede_B
+bounds:2,2,107,126
+rotate:90
+coconut_weevil_larva
+bounds:235,12,55,42
+rotate:90
+insect
+bounds:235,69,73,40

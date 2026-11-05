@@ -1,0 +1,11 @@
+Key_skel__Key.webp
+size:165,168
+filter:Linear,Linear
+pma:true
+Gas_cap
+bounds:2,59,161,107
+offsets:1,1,163,109
+Key
+bounds:2,2,55,131
+offsets:1,1,57,133
+rotate:90

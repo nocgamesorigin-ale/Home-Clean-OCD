@@ -1,0 +1,14 @@
+Hammer_skel__3e7cc4ae__Hammer.webp
+size:496,168
+filter:Linear,Linear
+pma:true
+hammer
+bounds:294,70,95,200
+rotate:90
+hammer_1
+bounds:2,10,155,290
+offsets:0,1,182,291
+rotate:90
+small_hammer
+bounds:294,2,66,155
+rotate:90

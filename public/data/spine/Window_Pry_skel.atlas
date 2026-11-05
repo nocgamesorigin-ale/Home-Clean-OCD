@@ -1,0 +1,14 @@
+Window_Pry_skel__Window_Pry.webp
+size:868,600
+filter:Linear,Linear
+pma:true
+crowbar_B
+bounds:815,159,46,436
+offsets:55,1,138,438
+crowbar_F
+bounds:815,81,51,76
+offsets:1,1,53,78
+window
+bounds:2,2,593,811
+offsets:4,3,601,816
+rotate:90

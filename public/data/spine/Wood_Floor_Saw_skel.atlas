@@ -1,0 +1,10 @@
+Wood_Floor_Saw_skel__Wood_Floor_Saw.webp
+size:968,52
+filter:Linear,Linear
+pma:true
+Dirty_Wood_Floor
+bounds:2,8,733,40
+Rip_Saw
+bounds:737,2,46,228
+offsets:2,1,49,230
+rotate:90

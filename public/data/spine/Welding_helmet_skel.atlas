@@ -1,0 +1,12 @@
+Welding_helmet_skel__Welding_helmet.webp
+size:1420,884
+filter:Linear,Linear
+pma:true
+Welding_helmet
+bounds:2,2,879,1134
+offsets:1,2,881,1137
+rotate:90
+glow
+bounds:1138,376,505,278
+offsets:6,4,513,290
+rotate:90

@@ -1,0 +1,15 @@
+Disassemble_the_speake_skel__Disassemble_the_speake.webp
+size:288,152
+filter:Linear,Linear
+pma:true
+button_001
+bounds:123,2,72,72
+button_002
+bounds:197,6,68,68
+pliers_1
+bounds:123,76,71,163
+offsets:1,1,73,165
+rotate:90
+pliers_2
+bounds:2,14,119,133
+offsets:1,1,121,135

@@ -1,0 +1,12 @@
+Chainsaw_skel__560f7436__Chainsaw.webp
+size:460,144
+filter:Linear,Linear
+pma:true
+body
+bounds:314,3,143,138
+offsets:1,1,146,140
+saw_blade
+bounds:2,2,208,63
+saw_blade_1
+bounds:2,67,310,74
+offsets:1,1,313,76

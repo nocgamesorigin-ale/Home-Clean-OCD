@@ -1,0 +1,11 @@
+Screwdriver_skel__Screwdriver.webp
+size:332,140
+filter:Linear,Linear
+pma:true
+screwdriver
+bounds:2,2,136,295
+offsets:1,1,138,297
+rotate:90
+screws_1
+bounds:299,105,33,31
+rotate:90

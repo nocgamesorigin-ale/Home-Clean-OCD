@@ -1,0 +1,15 @@
+Pump_skel__Pump.webp
+size:362,392
+filter:Linear,Linear
+pma:true
+scale:0.9
+Pittong
+bounds:2,79,158,311
+offsets:0,1,159,312
+Pump_B
+bounds:162,42,198,348
+offsets:45,0,243,348
+Pump_F
+bounds:2,2,59,225
+offsets:0,0,60,225
+rotate:90

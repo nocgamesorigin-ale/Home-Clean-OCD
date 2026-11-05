@@ -1,0 +1,14 @@
+Pour_Caps_skel__Pour_Caps.webp
+size:396,220
+filter:Linear,Linear
+pma:true
+Bottle_Cap_G
+bounds:355,132,40,39
+rotate:90
+Bottle_Cap_R
+bounds:355,90,37,40
+Bottle_Cap_Y
+bounds:355,174,39,41
+Scoop_Net
+bounds:2,2,213,351
+rotate:90

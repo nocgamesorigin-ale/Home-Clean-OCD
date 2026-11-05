@@ -1,0 +1,17 @@
+Lv1_Sink_skel__Lv1_Sink.webp
+size:572,236
+filter:Linear,Linear
+pma:true
+Bottle_Cap_G
+bounds:528,150,40,39
+rotate:90
+Bottle_Cap_R
+bounds:528,108,37,40
+Bottle_Cap_Y
+bounds:528,192,39,41
+water_dirty_1
+bounds:2,2,231,261
+rotate:90
+water_dirty_2
+bounds:265,3,230,261
+rotate:90

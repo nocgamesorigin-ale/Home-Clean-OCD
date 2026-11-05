@@ -1,0 +1,16 @@
+Lawn_Mower_skel__Lawn_Mower.webp
+size:768,544
+filter:Linear,Linear
+pma:true
+body
+bounds:2,2,539,587
+offsets:1,1,541,589
+rotate:90
+item
+bounds:591,37,164,113
+offsets:1,1,166,115
+tile
+bounds:591,152,107,213
+wheel
+bounds:591,367,174,174
+offsets:1,1,176,176

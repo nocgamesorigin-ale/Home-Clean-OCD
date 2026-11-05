@@ -1,0 +1,16 @@
+Turn_the_screw_skel__Turn_the_screw.webp
+size:520,64
+filter:Linear,Linear
+pma:true
+clean_screw
+bounds:357,24,36,79
+offsets:1,1,38,81
+rotate:90
+rusty_nail
+bounds:438,25,35,79
+offsets:1,1,37,81
+rotate:90
+screwdriver
+bounds:2,2,58,353
+offsets:1,1,60,355
+rotate:90

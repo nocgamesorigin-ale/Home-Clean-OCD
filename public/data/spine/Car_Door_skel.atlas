@@ -1,0 +1,12 @@
+Car_Door_skel__Car_Door.webp
+size:1264,252
+filter:Linear,Linear
+pma:true
+door
+bounds:2,2,248,967
+offsets:12,12,266,1001
+rotate:90
+hammer
+bounds:971,95,155,290
+offsets:0,1,182,291
+rotate:90

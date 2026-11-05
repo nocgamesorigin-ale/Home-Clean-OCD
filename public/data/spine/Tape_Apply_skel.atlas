@@ -1,0 +1,17 @@
+Tape_Apply_skel__Tape_Apply.webp
+size:940,212
+filter:Linear,Linear
+pma:true
+Tape
+bounds:2,2,467,78
+Tape_1
+bounds:471,2,467,78
+Tape_2
+bounds:2,146,62,698
+rotate:90
+Tape_3
+bounds:2,82,62,698
+rotate:90
+Tape_Roll
+bounds:702,143,111,65
+offsets:1,1,113,67

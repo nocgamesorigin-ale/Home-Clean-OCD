@@ -1,0 +1,19 @@
+Air_condition_skel__Air_condition.webp
+size:1380,796
+filter:Linear,Linear
+pma:true
+filter_1
+bounds:1077,79,209,81
+filter_1_clean
+bounds:1077,2,209,75
+shell
+bounds:1229,177,614,146
+offsets:0,0,614,147
+rotate:90
+shell_clean
+bounds:1077,162,629,150
+offsets:3,3,636,153
+rotate:90
+waterproof tarp
+bounds:2,19,772,1073
+rotate:90

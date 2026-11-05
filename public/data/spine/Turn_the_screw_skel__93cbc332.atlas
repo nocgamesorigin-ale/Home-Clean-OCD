@@ -1,0 +1,15 @@
+Turn_the_screw_skel__93cbc332__Turn_the_screw.webp
+size:196,132
+filter:Linear,Linear
+pma:true
+handle_dirty
+bounds:40,92,143,35
+offsets:1,1,145,37
+screw
+bounds:2,110,17,17
+offsets:1,1,19,19
+screw_clean
+bounds:21,110,17,17
+screwdriver
+bounds:2,2,88,192
+rotate:90

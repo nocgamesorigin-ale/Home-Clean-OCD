@@ -1,0 +1,13 @@
+Pour_Bleach_skel__Pour_Bleach.webp
+size:692,524
+filter:Linear,Linear
+pma:true
+Bleach
+bounds:2,2,573,519
+offsets:0,0,573,525
+Bleach_Bottle
+bounds:577,285,236,110
+offsets:1,1,238,112
+rotate:90
+Water_Stream
+bounds:577,135,36,148

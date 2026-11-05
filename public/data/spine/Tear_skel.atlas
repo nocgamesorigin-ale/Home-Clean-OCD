@@ -1,0 +1,15 @@
+Tear_skel__Tear.webp
+size:463,128
+filter:Linear,Linear
+pma:true
+Tear
+bounds:392,33,93,69
+offsets:0,0,93,70
+rotate:270
+Tear_1
+bounds:2,32,263,94
+Tear_2
+bounds:171,2,167,46
+rotate:180
+Tear_3
+bounds:266,47,142,79

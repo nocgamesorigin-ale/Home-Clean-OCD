@@ -1,0 +1,16 @@
+Scrape_moss_skel__Scrape_moss.webp
+size:400,368
+filter:Linear,Linear
+pma:true
+Dirt_Scrape
+bounds:2,7,102,222
+offsets:0,1,102,223
+rotate:90
+reu_001
+bounds:2,111,228,252
+reu_002
+bounds:232,108,164,255
+offsets:0,0,164,256
+reu_003
+bounds:226,2,104,160
+rotate:90

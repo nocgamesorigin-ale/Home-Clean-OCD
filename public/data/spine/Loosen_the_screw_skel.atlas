@@ -1,0 +1,11 @@
+Loosen_the_screw_skel__Loosen_the_screw.webp
+size:188,72
+filter:Linear,Linear
+pma:true
+oc_vit
+bounds:152,6,64,32
+rotate:90
+screwdriver
+bounds:2,2,68,148
+offsets:1,1,69,149
+rotate:90

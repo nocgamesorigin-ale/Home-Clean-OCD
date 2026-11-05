@@ -1,0 +1,14 @@
+Tighten_Screw_skel__792c5b90__Tighten_Screw.webp
+size:252,32
+filter:Linear,Linear
+pma:true
+screw
+bounds:2,9,20,38
+offsets:1,1,22,40
+rotate:90
+screw_2
+bounds:42,8,21,42
+rotate:90
+screwdriver
+bounds:86,2,27,164
+rotate:90

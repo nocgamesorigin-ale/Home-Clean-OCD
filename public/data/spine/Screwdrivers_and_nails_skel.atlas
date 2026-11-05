@@ -1,0 +1,11 @@
+Screwdrivers_and_nails_skel__Screwdrivers_and_nails.webp
+size:236,100
+filter:Linear,Linear
+pma:true
+dinh
+bounds:211,34,23,64
+offsets:1,2,24,68
+screwdriver
+bounds:2,2,96,207
+offsets:1,1,97,208
+rotate:90

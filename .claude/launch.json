@@ -1,0 +1,12 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "home-clean-makeover",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["vite", "--port", "5210", "--strictPort"],
+      "port": 5210,
+      "url": "http://127.0.0.1:5210"
+    }
+  ]
+}

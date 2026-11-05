@@ -1,0 +1,15 @@
+Swimming_pool_skel__b653fc8c__Swimming_pool.webp
+size:1420,1100
+filter:Linear,Linear
+pma:true
+Water_Pump
+bounds:1136,553,543,281
+offsets:0,2,546,283
+rotate:90
+Water_Pump_1
+bounds:1136,474,208,77
+offsets:0,1,211,78
+water_clean
+bounds:2,549,1132,547
+water_dirty
+bounds:2,2,1132,545

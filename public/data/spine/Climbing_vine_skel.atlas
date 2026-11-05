@@ -1,0 +1,11 @@
+Climbing_vine_skel__Climbing_vine.webp
+size:680,388
+filter:Linear,Linear
+pma:true
+climbing_vine
+bounds:2,213,171,673
+rotate:90
+climbing_vine_1
+bounds:2,2,209,544
+offsets:0,0,222,544
+rotate:90

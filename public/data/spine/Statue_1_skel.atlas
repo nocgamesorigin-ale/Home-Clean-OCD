@@ -1,0 +1,23 @@
+Statue_1_skel__Statue_1.webp
+size:1576,472
+filter:Linear,Linear
+pma:true
+glow (73)
+bounds:1463,173,109,108
+offsets:9,9,128,128
+rotate:90
+statue_A
+bounds:2,2,468,704
+offsets:1,1,470,706
+rotate:90
+statue_B
+bounds:708,2,468,704
+offsets:1,1,470,706
+rotate:90
+water
+bounds:1414,38,432,47
+rotate:90
+water_1
+bounds:1463,284,37,186
+water_drop
+bounds:1414,21,10,15

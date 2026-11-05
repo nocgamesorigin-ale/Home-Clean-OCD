@@ -1,0 +1,15 @@
+Roof_Top_skel__Roof_Top.webp
+size:445,248
+filter:Linear,Linear
+pma:true
+Broom_1
+bounds:2,9,20,237
+Broom_2
+bounds:24,12,18,234
+Broom_3
+bounds:306,50,196,137
+rotate:90
+Nest
+bounds:44,2,244,260
+offsets:1,2,246,263
+rotate:90

@@ -1,0 +1,14 @@
+Smash_bricks_skel__Smash_bricks.webp
+size:168,240
+filter:Linear,Linear
+pma:true
+hammer
+bounds:2,37,95,200
+manh_vo_a
+bounds:2,2,65,33
+offsets:1,2,68,36
+manh_vo_b
+bounds:99,37,67,43
+offsets:0,1,68,44
+small_hammer
+bounds:99,82,66,155

@@ -1,0 +1,13 @@
+Open_tool_skel__Open_tool.webp
+size:280,132
+filter:Linear,Linear
+pma:true
+finger
+bounds:239,47,38,81
+glow
+bounds:2,2,126,125
+offsets:2,0,128,128
+rotate:90
+hand
+bounds:129,5,123,108
+rotate:90

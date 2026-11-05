@@ -1,0 +1,15 @@
+Sew_Tear_skel__Sew_Tear.webp
+size:512,120
+filter:Linear,Linear
+pma:true
+Tear
+bounds:2,51,363,64
+offsets:0,2,365,66
+mini handheld_sewing_machine
+bounds:367,22,93,142
+offsets:1,1,95,144
+rotate:90
+mini handheld_sewing_machine_1
+bounds:2,2,47,129
+offsets:1,2,49,132
+rotate:90

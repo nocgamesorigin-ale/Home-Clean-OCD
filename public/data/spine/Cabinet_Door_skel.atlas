@@ -1,0 +1,16 @@
+Cabinet_Door_skel__Cabinet_Door.webp
+size:640,808
+filter:Linear,Linear
+pma:true
+Crowbar_B
+bounds:285,2,108,113
+rotate:90
+Crowbar_F
+bounds:567,151,69,653
+offsets:11,0,80,653
+broken_door_1
+bounds:2,110,281,694
+offsets:0,1,286,695
+broken_door_2
+bounds:285,112,280,692
+offsets:6,0,288,692

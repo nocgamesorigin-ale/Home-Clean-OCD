@@ -1,0 +1,13 @@
+Potted_plant_skel__3de73380__Potted_plant.webp
+size:888,480
+filter:Linear,Linear
+pma:true
+potted_plant_1
+bounds:2,153,325,588
+rotate:90
+potted_plant_2
+bounds:2,2,149,550
+offsets:5,0,154,550
+rotate:90
+potted_plant_3
+bounds:592,102,293,376

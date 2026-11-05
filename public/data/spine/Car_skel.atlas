@@ -1,0 +1,12 @@
+Car_skel__Car.webp
+size:1136,284
+filter:Linear,Linear
+pma:true
+Ef_wthite
+bounds:2,277,2,2
+car_Black
+bounds:578,2,556,277
+offsets:3,2,560,297
+car_Red
+bounds:6,4,570,275
+offsets:43,91,619,503

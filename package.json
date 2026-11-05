@@ -1,0 +1,22 @@
+{
+  "name": "home-clean-makeover",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "asset": "node tools/gen-asset.mjs"
+  },
+  "dependencies": {
+    "@esotericsoftware/spine-pixi-v8": "~4.2",
+    "pixi.js": "^8.22.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3",
+    "vite": "^6.4.5"
+  },
+  "description": "Home Clean Makeover — web remake (PixiJS + Spine) of the original Unity game, made with GameKit."
+}

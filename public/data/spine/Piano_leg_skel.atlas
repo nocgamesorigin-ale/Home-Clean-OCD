@@ -1,0 +1,10 @@
+Piano_leg_skel__Piano_leg.webp
+size:416,152
+filter:Linear,Linear
+pma:true
+piano_leg
+bounds:243,22,127,171
+rotate:90
+piano_leg_1
+bounds:2,2,147,239
+rotate:90

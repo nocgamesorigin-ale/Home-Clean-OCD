@@ -1,0 +1,10 @@
+Glue_Gun_skel__Glue_Gun.webp
+size:296,152
+filter:Linear,Linear
+pma:true
+Gun_Body
+bounds:2,2,265,147
+offsets:1,14,267,162
+Handle
+bounds:269,26,25,123
+offsets:1,1,27,125

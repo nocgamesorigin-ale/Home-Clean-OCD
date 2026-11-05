@@ -1,0 +1,12 @@
+Steering_Wheel_skel__Steering_Wheel.webp
+size:316,80
+filter:Linear,Linear
+pma:true
+BanhLai
+bounds:2,2,73,205
+offsets:0,1,73,206
+rotate:90
+TayLai
+bounds:209,2,95,73
+screw
+bounds:306,67,8,8

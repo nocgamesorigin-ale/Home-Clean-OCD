@@ -1,0 +1,19 @@
+Decorate_skel__7fa690a3__Decorate.webp
+size:444,284
+filter:Linear,Linear
+pma:true
+bon_phun_001
+bounds:202,28,254,128
+offsets:3,3,260,132
+rotate:90
+bon_phun_002
+bounds:2,2,280,198
+offsets:3,2,284,200
+rotate:90
+flare (79)
+bounds:332,107,60,64
+offsets:0,0,64,64
+glow (73)
+bounds:332,173,109,108
+offsets:9,9,128,128
+rotate:90

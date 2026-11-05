@@ -1,0 +1,15 @@
+Pour_Toilet_Cleaner_skel__a5dd2241__Pour_Toilet_Cleaner.webp
+size:356,308
+filter:Linear,Linear
+pma:true
+Toilet_Cleaner
+bounds:2,21,283,208
+offsets:3,1,286,209
+rotate:90
+Toilet_Cleaner_Bottle
+bounds:212,25,279,139
+offsets:9,38,312,195
+rotate:90
+Water_Stream
+bounds:212,2,21,85
+rotate:90

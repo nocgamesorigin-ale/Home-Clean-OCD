@@ -1,0 +1,14 @@
+Scissors_skel__Scissors.webp
+size:628,164
+filter:Linear,Linear
+pma:true
+scissor_1
+bounds:298,2,160,283
+offsets:1,1,162,286
+rotate:90
+scissor_2
+bounds:2,3,159,294
+offsets:1,1,161,296
+rotate:90
+scissor_srping
+bounds:583,98,43,64

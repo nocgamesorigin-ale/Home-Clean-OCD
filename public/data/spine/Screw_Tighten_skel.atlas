@@ -1,0 +1,9 @@
+Screw_Tighten_skel__Screw_Tighten.webp
+size:64,456
+filter:Linear,Linear
+pma:true
+screw
+bounds:2,2,29,95
+screwdriver
+bounds:2,99,58,353
+offsets:1,1,60,355

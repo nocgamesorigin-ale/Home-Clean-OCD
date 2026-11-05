@@ -1,0 +1,17 @@
+Old_newspaper_skel__Old_newspaper.webp
+size:1188,276
+filter:Linear,Linear
+pma:true
+Dirt_Scrape
+bounds:1081,49,102,222
+offsets:0,1,102,223
+old_newspaper_1
+bounds:292,36,281,235
+old_newspaper_2
+bounds:2,2,269,288
+rotate:90
+old_newspaper_3
+bounds:575,15,256,251
+rotate:90
+old_newspaper_4
+bounds:828,15,251,256

@@ -1,0 +1,16 @@
+Tick_skel__Tick.webp
+size:140,92
+filter:Linear,Linear
+pma:true
+body
+bounds:2,3,45,84
+leg_1
+bounds:90,61,26,47
+rotate:90
+leg_2
+bounds:49,2,53,25
+leg_3
+bounds:104,3,56,31
+rotate:90
+leg_4
+bounds:49,29,39,58

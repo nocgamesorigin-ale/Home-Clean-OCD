@@ -1,0 +1,13 @@
+Pour_Detergent_skel__6ecebf8f__Pour_Detergent.webp
+size:452,224
+filter:Linear,Linear
+pma:true
+Detergent
+bounds:2,2,219,401
+rotate:90
+Flow
+bounds:405,84,44,137
+offsets:0,2,44,139
+laundry_detergent
+bounds:405,20,62,45
+rotate:90

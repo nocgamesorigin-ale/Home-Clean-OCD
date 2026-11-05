@@ -1,0 +1,15 @@
+Clump_of_grass_skel__Clump_of_grass.webp
+size:704,284
+filter:Linear,Linear
+pma:true
+wildbush_2
+bounds:2,16,256,264
+offsets:4,16,284,281
+wildbush_3
+bounds:472,50,230,229
+offsets:11,13,259,243
+rotate:90
+wildgrass_0
+bounds:260,2,278,210
+offsets:0,0,278,211
+rotate:90

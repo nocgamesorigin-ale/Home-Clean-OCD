@@ -1,0 +1,10 @@
+Botfly_skel__Botfly.webp
+size:52,80
+filter:Linear,Linear
+pma:true
+bug
+bounds:2,31,46,47
+wing_1
+bounds:2,2,22,27
+wing_2
+bounds:26,2,22,27

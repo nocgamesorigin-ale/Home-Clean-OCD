@@ -1,0 +1,12 @@
+Faucet_Remove_skel__Faucet_Remove.webp
+size:435,463
+filter:Linear,Linear
+pma:true
+water_faucet
+bounds:2,2,170,404
+rotate:90
+wrench_D
+bounds:382,174,52,51
+rotate:90
+wrench_U
+bounds:2,174,378,287

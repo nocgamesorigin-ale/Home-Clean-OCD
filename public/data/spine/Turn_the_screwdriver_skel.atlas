@@ -1,0 +1,14 @@
+Turn_the_screwdriver_skel__Turn_the_screwdriver.webp
+size:528,104
+filter:Linear,Linear
+pma:true
+cabinet_lock
+bounds:2,2,97,311
+offsets:1,1,99,313
+rotate:90
+nail
+bounds:509,83,16,16
+offsets:1,1,18,18
+screwdriver
+bounds:315,11,88,192
+rotate:90
