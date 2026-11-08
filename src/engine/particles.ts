@@ -268,7 +268,9 @@ export class Emitter {
     this.view.addChild(s);
     const spin = this.d.spin ? rnd(this.d.spin) : 0;
     // Unity scales particles with the transforms above the system (effects sit under tools scaled < 1)
-    const hs = Math.min(1, Math.sqrt(Math.abs(m.a * m.d - m.b * m.c)) || 1);
+    // (the longer axis, not the area: a system turned 90° about X — Unity's usual cone setup —
+    // has one axis flattened to ~0 in 2D, and the area would shrink its particles to nothing)
+    const hs = Math.min(1, Math.max(Math.hypot(m.a, m.b), Math.hypot(m.c, m.d)) || 1);
     this.parts.push({ s, x: wx, y: wy, vx: dx * speed, vy: dy * speed, age: 0, life: Math.max(0.05, rnd(this.d.life)), size: rnd(this.d.size) * hs, rot: rnd(this.d.rot), spin, tint: c0, frame });
   }
 

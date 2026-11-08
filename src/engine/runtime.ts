@@ -356,6 +356,8 @@ export class Runtime {
       this.badge.hide();
       // the step's job is done: no loop (soap, spray, motor...) keeps playing over the next one
       stopLoops(0.25);
+      this.lingering = [];
+      this.slotFlush.clear();
       this.voices.clear();
       this.dragVoice = null;
     }
@@ -451,7 +453,9 @@ export class Runtime {
       case 'MoveAndFaded': {
         const dir = num(c.direction);
         const dist = num(c.m_Distance, 10);
-        const [dx, dy] = [[-1, 0], [1, 0], [0, -1], [0, 1]][dir] ?? [1, 0];
+        // the original's direction enum goes clockwise: up, right, down, left (trash cans that came
+        // in from the left leave with 3 = left, tools parked on the right leave with 1 = right)
+        const [dx, dy] = [[0, 1], [1, 0], [0, -1], [-1, 0], [-0.7, 0.7], [0.7, 0.7]][dir] ?? [1, 0];
         await Promise.all(
           this.gosOf(c.m_GameObj).map(async (o) => {
             const p = o.worldPos();
@@ -459,6 +463,11 @@ export class Runtime {
             const sprites = this.gosOf(c.sprite).filter((x) => x.sprite);
             if (fadeT > 0 && sprites.length)
               void this.sleep(Math.max(0, T - fadeT)).then(() => Promise.all(sprites.map((x) => { const a = x.sprite!.alpha; return this.tween(fadeT, (k) => (x.sprite!.alpha = a * (1 - k))); })));
+            // no sprite listed: the whole object fades out on its way (it must not stay in view)
+            else if (fadeT > 0) {
+              const a0 = o.view.alpha;
+              void this.sleep(Math.max(0, T - fadeT)).then(() => this.tween(fadeT, (k) => (o.view.alpha = a0 * (1 - k))));
+            }
             await this.moveTo(o, new Point(p.x + dx * dist, p.y + dy * dist), T);
             if (c.m_OffColliderWhenDoneMove) o.colliders.forEach((col) => (col.enabled = false));
           }),
@@ -1156,7 +1165,8 @@ export class Runtime {
       }
       case 'DragObjectMultiSlot':
       case 'DragObjectMultipleSlot_ToolSwap': {
-        const given = this.dragItemFor.get(key({ go: g.id, comp: g.data.comps.indexOf(c) }));
+        const slotKey = key({ go: g.id, comp: g.data.comps.indexOf(c) });
+        const given = this.dragItemFor.get(slotKey) ?? (refs(c.m_DragItem).length ? undefined : this.soapTool(slotKey));
         let items = given ? [given] : this.gosOf(c.m_DragItem);
         if (c.t === 'DragObjectMultipleSlot_ToolSwap') {
           const choices = refs(c.m_ChooseOptionItems).map((r) => r.go);
@@ -1185,23 +1195,49 @@ export class Runtime {
         const fired = new Set<GO>();
         // slots switched off by the level do not have to be touched
         const allDone = () => slots.every((s) => fired.has(s.go) || !s.go.selfActive);
+        // m_CompleteBySlot: how many slots finish the task (0 = all). A scrape over 136 debris
+        // points needs only a few: the scratch card next to it decides when the job is done
+        const needN = Math.max(0, num(c.m_CompleteBySlot));
+        const enough = () => allDone() || (needN > 0 && fired.size >= needN);
         task.items = items;
-        task.progress = () => fired.size / Math.max(1, slots.filter((s) => fired.has(s.go) || s.go.selfActive).length);
-        task.onMove = (m) => {
+        task.progress = () =>
+          needN > 0 ? Math.min(1, fired.size / needN) : fired.size / Math.max(1, slots.filter((s) => fired.has(s.go) || s.go.selfActive).length);
+        const fire = (m: GO) => {
           for (const s of slots) {
             if (fired.has(s.go) || !s.go.selfActive) continue;
             if (this.overlap(m, s.go, 1.2)) {
               fired.add(s.go);
               this.triggers++;
               void this.runHolder(s.comp?.m_TweenOnTriggerHolder);
-              if (allDone()) task.finish();
             }
           }
+        };
+        // the linked scratch (SoapCleaningMethods) is done: every slot left plays its change (the
+        // soap foam goes away) without the per-slot noise (sounds, particles, vibration)
+        this.slotFlush.set(slotKey, () => {
+          for (const s of slots) {
+            if (fired.has(s.go) || !s.go.selfActive) continue;
+            fired.add(s.go);
+            const h = this.scene.get(s.comp?.m_TweenOnTriggerHolder as Ref);
+            // (in order, delays kept: the foam plays "disappear" before it is switched off)
+            if (h) void this.runList(h.children.filter((ch) => !ch.comps().some((cc) => /^(PlayAudio|PlayParticle|PlayVibration)/.test(cc.t))));
+          }
+          done();
+        });
+        const done = () => {
+          if (task.done) return;
+          task.finish();
+          // the slots still react (debris, sounds) while the tool keeps working in this step
+          if (!allDone()) this.lingering.push({ items, onMove: fire });
+        };
+        task.onMove = (m) => {
+          fire(m);
+          if (enough()) done();
         };
         task.goals = () => slots.filter((s) => !fired.has(s.go) && s.go.selfActive).map((s) => this.centre(s.go));
         task.left = task.goals;
         task.onRelease = () => {
-          if (allDone()) task.finish();
+          if (enough()) done();
           return false;
         };
         return task;
@@ -1338,8 +1374,11 @@ export class Runtime {
           return false;
         };
         const fin0 = task.finish;
+        const sl = g.comp('SoapCleaningMethods')?.m_SoapDragSlot;
+        const soapSlot = isRef(sl) ? sl : undefined;
         task.finish = () => {
           if (task.done) return;
+          if (soapSlot) this.slotFlush.get(key(soapSlot))?.();
           endScrub();
           for (const f of this.fadeByCard) if (cards.some((x) => key({ go: x.go.id, comp: x.go.data.comps.indexOf(x.data) }) === f.card)) for (const sgo of f.sprites) if (sgo.sprite && f.down) void this.tween(0.3, (k) => (sgo.sprite!.alpha *= 1 - k));
           fin0();
@@ -2147,7 +2186,8 @@ export class Runtime {
     for (const t of this.tasks) {
       const it = t.items.find((i) => i.activeInHierarchy && onScreen(i));
       if (it) {
-        const goal = t.goals?.()[0];
+        // point at a spot still to do (a scratch card's sweep starts at a bare corner)
+        const goal = t.left?.()[0] ?? t.goals?.()[0];
         this.hint.show(this.centre(it), goal ?? null);
         return;
       }
@@ -2367,6 +2407,7 @@ export class Runtime {
     // every task using this item hears about the move (e.g. a sponge that fills slots and scrubs)
     const it = this.drag.item;
     for (const t of [...this.tasks]) if (!t.done && t.items.includes(it)) t.onMove?.(it);
+    for (const l of this.lingering) if (l.items.includes(it)) l.onMove(it);
     // dragging a tool to the screen edge slides the camera along
     if (this.camZone?.h) {
       const w = this.app.screen.width;
@@ -2397,6 +2438,25 @@ export class Runtime {
   private dragVoice: Voice | null = null;
   private dragSound: string | null = null;
   private workedAt = -1;
+  /** Slot tasks linked to a scratch (SoapCleaningMethods): play every slot left when it is done. */
+  private slotFlush = new Map<string, () => void>();
+
+  /** A slot task with no drag item of its own takes the tool of the scratch linked to it
+   * (SoapCleaningMethods.m_SoapDragSlot): the water spray that washes the foam off. */
+  private soapTool(slotKey: string): GO | undefined {
+    for (const o of this.scene.gos) {
+      const sc = o.comp('SoapCleaningMethods');
+      if (!sc || !isRef(sc.m_SoapDragSlot) || key(sc.m_SoapDragSlot) !== slotKey) continue;
+      const so = o.comps().find((x) => x.t === 'ScratchObject' || x.t === 'ScratchObject_DragToolSwap');
+      if (!so) continue;
+      if (so.t === 'ScratchObject_DragToolSwap') return this.gosOf(so.m_DragItem)[this.choiceIndex(so.m_ChooseOptionItems)] ?? this.gosOf(so.m_DragItem)[0];
+      return this.toolFor.get(key({ go: o.id, comp: o.data.comps.indexOf(so) })) ?? this.item(so.m_DraggableItem);
+    }
+    return undefined;
+  }
+
+  /** Finished slot tasks whose slots still play their effects until the step ends. */
+  private lingering: { items: GO[]; onMove: (m: GO) => void }[] = [];
   /** the playing work sound is a stand-in scrub sound: it only plays while the tool rubs */
   private dragFallback = false;
   private fallbackAt = -1;
