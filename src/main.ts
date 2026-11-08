@@ -3,7 +3,7 @@
 import { Application, Container, Graphics, Text } from 'pixi.js';
 import { openCheat } from './cheat';
 import { emit, levelChanged, registerLevels } from './gamekit';
-import { unlockAudio } from './engine/audio';
+import { preloadAudio, unlockAudio } from './engine/audio';
 import { Runtime } from './engine/runtime';
 import { Scene } from './engine/scene';
 import type { LevelData, SpriteMeta } from './engine/types';
@@ -116,6 +116,10 @@ async function boot(): Promise<void> {
   homeButton(ch?.code);
 
   const level = await json<LevelData>(`levels/${lv}.json`);
+  // every clip the level uses, fetched and decoded now so sounds come right with the action
+  const clips = new Set(['Pick_Items', 'Item_Drop', 'Squirt', 'Slapping', 'Take_Item_1', 'Success_Long', 'Success_Magic', 'Hammer_Wood', 'Rubbing', 'Sweeping']);
+  for (const m of JSON.stringify(level).matchAll(/"audio":\s*"([^"]+)"/g)) clips.add(m[1]);
+  preloadAudio(clips);
   const scene = new Scene(level, layers);
   scene.spriteMetaOf = (k) => spriteMeta[k];
   await scene.build(spriteMeta, spineMeta);
@@ -187,6 +191,8 @@ async function boot(): Promise<void> {
   cheatButton(() => openCheat(chapters, rt));
 
   if (params.get('debug')) Object.assign(window, { rt, scene, app });
+  // ?pick=1: QA picks the 2nd option of every tool choice (each choice must be playable)
+  rt.ui.debugPick = Number(params.get('pick') ?? 0) || 0;
   if (params.get('auto')) autoTest(rt, scene);
 
   emit('levelStart', { level: current + 1, file: lv, room: info?.room ?? '' });

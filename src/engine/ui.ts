@@ -89,8 +89,12 @@ export class ChooserUI {
 
   /** Debug auto-play: pick the first option. */
   pickFirst(): void {
-    this.first?.();
+    (this.pickers[Math.min(this.debugPick, this.pickers.length - 1)] ?? this.first)?.();
   }
+
+  /** Debug / QA: which option pickFirst() takes (to test every tool choice). */
+  debugPick = 0;
+  private pickers: (() => void)[] = [];
 
   private queue: Promise<unknown> = Promise.resolve();
 
@@ -144,9 +148,14 @@ export class ChooserUI {
           this.view.removeChildren();
           this.busy = false;
           this.first = null;
+          this.pickers = [];
           resolve(o);
         };
-        if (i === 0) this.first = pick;
+        if (i === 0) {
+          this.first = pick;
+          this.pickers = [];
+        }
+        this.pickers.push(pick);
         btn.on('pointertap', pick);
         panel.addChild(btn);
       });

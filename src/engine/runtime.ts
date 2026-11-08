@@ -8,7 +8,7 @@
 // A "holder" GameObject (ActionsOnDoneHolder, TweenOnTrigger, a DragColliderTarget...)
 // runs its children's actions the same way when its event fires.
 import { Assets, Graphics, Point, Rectangle, type Application, type Texture } from 'pixi.js';
-import { play, type Voice } from './audio';
+import { play, stopLoops, type Voice } from './audio';
 import type { GO, Scene } from './scene';
 import { ScratchCard } from './scratch';
 import { isRef, num, refs, type CompData, type Ref } from './types';
@@ -40,6 +40,8 @@ interface Task {
   kind?: string;
   /** Debug auto-play: world points the tool should visit. */
   goals?(): Point[];
+  /** The spots still to do, marked on screen near the end so the last bits are easy to find. */
+  left?(): Point[];
   /** Called while an item is dragged; return true when the task is done. */
   onMove?(item: GO): void;
   /** Called on release; return true when the item was used (no snap back). */
@@ -98,10 +100,10 @@ export class Runtime {
   ) {
     this.ui = new ChooserUI(app, scene);
     this.badge = new ToolBadge(app);
-    for (const v of [this.fx.view, this.hint.view]) {
+    for (const v of [this.marks, this.fx.view, this.hint.view]) {
       scene.world.addChild(v);
       scene.layer.attach(v);
-      v.zIndex = 1e16 + (v === this.hint.view ? 1 : 0);
+      v.zIndex = 1e16 + (v === this.hint.view ? 1 : v === this.marks ? -1 : 0);
     }
     this.spines = scene.gos.filter((g) => g.spine);
     // RandomRotationAtStart / RandomScaleAtStart: every copy (soap foam...) looks a little different
@@ -171,6 +173,11 @@ export class Runtime {
   private fadeByCard: { card: string; sprites: GO[]; down: boolean }[] = [];
   private fadeByCooking: { progress: number; sprites: GO[]; a0: number; a1: number }[] = [];
   readonly hint = new HandHint();
+  /** Pulsing rings on the last spots of a task (see Task.left). */
+  private marks = new Graphics();
+  private markPts: Point[] = [];
+  private markT = 0;
+  private markA = 0;
   /** Seconds since the player last touched the screen (drives the hand hint). */
   private idle = 0;
 
@@ -192,8 +199,9 @@ export class Runtime {
     for (const e of this.emitters.values()) e.update(dt, this.scene.world);
     this.behaviors.update(dt);
     this.updateHint(dt);
+    this.updateMarks(dt);
     this.updateBadge();
-    if (this.dragVoice && (!this.drag || this.time - this.workedAt > 0.2)) {
+    if (this.dragVoice && (!this.drag || this.time - this.workedAt > 0.2 || (this.dragFallback && this.time - this.fallbackAt > 0.25))) {
       this.dragVoice.stop(0.12);
       this.dragVoice = null;
     }
@@ -346,12 +354,16 @@ export class Runtime {
       this.stepChanges.push({ step: steps[i].name, changed: seen.size });
       this.dropTasks();
       this.badge.hide();
+      // the step's job is done: no loop (soap, spray, motor...) keeps playing over the next one
+      stopLoops(0.25);
+      this.voices.clear();
+      this.dragVoice = null;
     }
     this.progress = 1;
     this.stopSounds();
     this.fx.stopAll();
     this.fx.burst('sparkle', this.scene.camX, this.scene.camY, 40, this.scene.camSize * 1.2);
-    play('Level Complete');
+    play('Success_Long');
     this.finished = true;
   }
 
@@ -845,7 +857,7 @@ export class Runtime {
     const gen = (this.moveGen.get(o.id) ?? 0) + 1;
     this.moveGen.set(o.id, gen);
     // the script takes the tool out of the player's hand
-    if (!fromDrag && this.drag?.item === o) this.drag = null;
+    if (!fromDrag && this.drag?.item === o) this.dropDrag();
     const from = o.worldPos();
     await this.tween(sec, (k) => {
       if (this.moveGen.get(o.id) === gen) o.setWorldPos(from.x + (to.x - from.x) * k, from.y + (to.y - from.y) * k);
@@ -1024,7 +1036,7 @@ export class Runtime {
       // another task may still use the item in hand (scratch + nested trigger task)
       const other = this.tasks.find((t) => t.items.includes(this.drag!.item));
       if (other) this.drag.task = other;
-      else this.drag = null;
+      else this.dropDrag();
     }
     resolve();
   }
@@ -1130,7 +1142,7 @@ export class Runtime {
         task.items = [it];
         task.onMove = (m) => {
           if (this.drag && Math.hypot(m.worldPos().x - this.drag.start.x, m.worldPos().y - this.drag.start.y) > max * 0.6) {
-            this.drag = null;
+            this.dropDrag();
             void this.tween(0.4, (k) => (m.view.alpha = 1 - k)).then(() => m.setActive(false));
             void this.runHolder(c.ActionsOnDoneHolder);
             task.finish();
@@ -1178,7 +1190,7 @@ export class Runtime {
         task.onMove = (m) => {
           for (const s of slots) {
             if (fired.has(s.go) || !s.go.selfActive) continue;
-            if (this.overlap(m, s.go)) {
+            if (this.overlap(m, s.go, 1.2)) {
               fired.add(s.go);
               this.triggers++;
               void this.runHolder(s.comp?.m_TweenOnTriggerHolder);
@@ -1187,6 +1199,7 @@ export class Runtime {
           }
         };
         task.goals = () => slots.filter((s) => !fired.has(s.go) && s.go.selfActive).map((s) => this.centre(s.go));
+        task.left = task.goals;
         task.onRelease = () => {
           if (allDone()) task.finish();
           return false;
@@ -1195,7 +1208,9 @@ export class Runtime {
       }
       case 'ScratchObject':
       case 'ScratchObject_DragToolSwap': {
-        let it = this.item(c.m_DraggableItem) ?? this.toolFor.get(key({ go: g.id, comp: g.data.comps.indexOf(c) }));
+        // the tool picked for the linked slot task (SoapCleaningMethods: sponge OR soap spray) wins
+        // over the one written in the component, else picking the other tool leaves it waiting
+        let it = this.toolFor.get(key({ go: g.id, comp: g.data.comps.indexOf(c) })) ?? this.item(c.m_DraggableItem);
         if (c.t === 'ScratchObject_DragToolSwap') {
           const idx = this.choiceIndex(c.m_ChooseOptionItems);
           it = this.gosOf(c.m_DragItem)[idx] ?? it;
@@ -1240,13 +1255,34 @@ export class Runtime {
           if (task.done) return true;
           if (scrubbing && this.time - lastHit > 0.25) endScrub();
         });
+        let lastP: Point | null = null;
+        let lastAt = -1;
+        // a tool with no working sound of its own and no scrubbing sound in the level: a
+        // rubbing / sweeping / water sound from the game's clips, by what the tool is
+        const hasOwn = !!(it.comps().find((x) => 'm_Audio' in x)?.m_Audio as { audio?: string } | undefined)?.audio || onScr.length > 0 || !!c.actionOnScratchingHolder;
+        const scrubSound = hasOwn
+          ? undefined
+          : /broom|sweep|duster|feather|web/i.test(it.name)
+            ? 'Sweeping'
+            : /spray|water|hose|nozzle/i.test(it.name)
+              ? 'Water_Nozzle_Spray_1_Loop'
+              : /soap|foam/i.test(it.name)
+                ? 'Soap_Loop'
+                : /vacuum/i.test(it.name)
+                  ? 'Vacuum_Cleaner_Liquid'
+                  : 'Rubbing';
         task.onMove = (m) => {
           const p = this.toolPoint(m);
+          // a swipe is a line, not dots: stamp along the way from the previous point
+          const from = lastP && this.time - lastAt < 0.3 && Math.hypot(p.x - lastP.x, p.y - lastP.y) < 5 ? lastP : null;
+          lastP = p;
+          lastAt = this.time;
+          const toG = (q: Point) => this.scene.world.toGlobal(q);
           let hit = false;
-          for (const k of cards) hit = k.scratchAt(p, 0.75, (q) => this.scene.world.toGlobal(q)) || hit;
+          for (const k of cards) hit = (from ? k.scratchLine(from, p, 0.75, toG) : k.scratchAt(p, 0.75, toG)) || hit;
           if (!hit) return;
           lastHit = this.time;
-          this.toolWorking();
+          this.toolWorking(scrubSound);
           if (Math.random() < 0.35) this.fx.burst(fxKind, p.x, p.y, 1, 0.5);
           if (!scrubbing) {
             scrubbing = true;
@@ -1286,8 +1322,8 @@ export class Runtime {
             best = avg;
             gainAt = this.time;
           }
-          const stalled = avg >= 0.75 && this.time - gainAt > 1.5;
-          if (stalled || cards.every((k) => k.progress >= need(k))) {
+          const stalled = avg >= 0.75 && this.time - gainAt > 1.2;
+          if (stalled || avg >= 0.96 || cards.every((k) => k.progress >= need(k))) {
             cards.forEach((k) => k.complete());
             void this.runHolder(c.actionHolder);
             void this.runHolder(c.m_OnDoneScratch);
@@ -1295,7 +1331,9 @@ export class Runtime {
           }
         };
         task.goals = () => cards.flatMap((k) => k.sweep());
+        task.left = () => cards.flatMap((k) => (k.progress < need(k) ? k.remaining(3) : []));
         task.onRelease = () => {
+          lastP = null;
           endScrub();
           return false;
         };
@@ -1461,7 +1499,7 @@ export class Runtime {
             await this.runHolder(ci?.m_TweenOnDoneHolder);
           },
           (o) => {
-            play('Pop', { volume: 0.7 });
+            play('Take_Item_1', { volume: 0.7 });
             this.runRefs(ci?.m_ListTweenOnClick);
             if (ci?.m_DisableOnDone || c.m_DisableOnDone) o.colliders.forEach((k) => (k.enabled = false));
             if (ci?.m_HideOnDone) void this.tween(0.25, (k) => (o.view.alpha = 1 - k)).then(() => o.setActive(false));
@@ -1883,7 +1921,7 @@ export class Runtime {
           const p = m.worldPos();
           if (Math.hypot(p.x - this.drag.start.x, p.y - this.drag.start.y) >= goal) {
             voice?.stop();
-            this.drag = null;
+            this.dropDrag();
             if (done) play(done);
             void this.runHolder(c.m_TweenHolder);
             task.finish();
@@ -2022,11 +2060,11 @@ export class Runtime {
           for (const b of left) {
             if (!this.overlap(m, b)) continue;
             left.delete(b);
-            play('Spray', { volume: 0.7 });
+            play(/spray/i.test(m.name) ? 'Squirt' : 'Slapping', { volume: 0.7 });
             void this.tween(0.4, (k) => (b.view.alpha = 1 - k)).then(() => b.setActive(false));
           }
           if (!left.size) {
-            this.drag = null;
+            this.dropDrag();
             void this.runHolder([c.m_OnCloseTool1, c.m_OnCloseTool2, c.m_OnCloseTool3][idx]);
             task.finish();
           }
@@ -2056,6 +2094,36 @@ export class Runtime {
         task.taps = () => [new Point(this.scene.camX, this.scene.camY)];
         return task;
     }
+  }
+
+  /** Near the end of a scrub / spray task, rings pulse on the spots still left. */
+  private updateMarks(dt: number): void {
+    this.markT += dt;
+    if (this.markT >= 0.3 || !this.markPts.length) {
+      if (this.markT >= 0.3) this.markT = 0;
+      const t = this.tasks.find((x) => !x.done && x.left && x.items.some((i) => i.activeInHierarchy) && (x.progress?.() ?? 0) >= 0.6);
+      this.markPts = t ? t.left!().slice(0, 4) : [];
+    }
+    const on = this.markPts.length > 0;
+    this.markA = Math.max(0, Math.min(1, this.markA + (on ? dt : -dt) * 4));
+    this.marks.clear();
+    if (!this.markA || !on) return;
+    const k = this.scene.world.scale.x;
+    const ph = (this.time * 1.6) % 1;
+    for (const p of this.markPts) {
+      const r = (16 + 14 * ph) / k;
+      this.marks.circle(p.x, p.y, r).stroke({ width: 3 / k, color: 0xffffff, alpha: this.markA * (1 - ph) * 0.95 });
+      this.marks.circle(p.x, p.y, 7 / k).fill({ color: 0xffe066, alpha: this.markA * (0.55 + 0.35 * Math.sin(this.time * 6)) });
+    }
+  }
+
+  /** The tool leaves the player's hand without a release (task done, script move): its working
+   * effects (loop sounds, particles, Spine) go off as if the finger had let go. */
+  private dropDrag(): void {
+    const d = this.drag;
+    if (!d) return;
+    this.drag = null;
+    this.runDragList(d.item, 'm_ListTweenEndDrag');
   }
 
   /** After a few idle seconds, show the hand on the first thing the player can do. */
@@ -2215,7 +2283,7 @@ export class Runtime {
         }
         if (n > 1) {
           left.set(o, n - 1);
-          play('Pop', { volume: 0.7 });
+          play('Take_Item_1', { volume: 0.7 });
           void this.tween(0.12, (k) => o.view.scale.set(o.view.scale.x * (1 - 0.04 * Math.sin(k * Math.PI)), o.view.scale.y));
         } else {
           left.delete(o);
@@ -2329,11 +2397,19 @@ export class Runtime {
   private dragVoice: Voice | null = null;
   private dragSound: string | null = null;
   private workedAt = -1;
+  /** the playing work sound is a stand-in scrub sound: it only plays while the tool rubs */
+  private dragFallback = false;
+  private fallbackAt = -1;
 
   /** The held tool is doing its job this frame: its working sound is on. */
-  private toolWorking(): void {
+  private toolWorking(fallback?: string): void {
     this.workedAt = this.time;
-    if (!this.dragVoice && this.dragSound && this.drag) this.dragVoice = play(this.dragSound, { loop: true, volume: 0.8 });
+    if (fallback) this.fallbackAt = this.time;
+    const snd = this.dragSound ?? fallback;
+    if (!this.dragVoice && snd && this.drag) {
+      this.dragVoice = play(snd, { loop: true, volume: 0.8 });
+      this.dragFallback = !this.dragSound;
+    }
   }
 
   /** Every running loop off (level end). */

@@ -176,6 +176,53 @@ export class ScratchCard {
     return true;
   }
 
+  /** A stroke from a to b: stamps along the segment so a fast swipe leaves no gaps. */
+  scratchLine(a: Point, b: Point, worldRadius: number, worldToGlobal: (p: Point) => Point): boolean {
+    const d = Math.hypot(b.x - a.x, b.y - a.y);
+    const n = Math.min(40, Math.max(1, Math.ceil(d / (worldRadius * 0.3))));
+    let hit = false;
+    for (let i = 1; i <= n; i++) {
+      const k = i / n;
+      hit = this.scratchAt(new Point(a.x + (b.x - a.x) * k, a.y + (b.y - a.y) * k), worldRadius, worldToGlobal) || hit;
+    }
+    return hit;
+  }
+
+  /** World points of the biggest patches still to do (the "last bits" markers). */
+  remaining(max = 4): Point[] {
+    const s = this.surface?.sprite;
+    if (!s || !this.go.selfActive || this.count >= this.total) return [];
+    // group the cells left into 4x4 blocks; the fullest blocks are the patches to show
+    const B = 4;
+    const blocks: { n: number; x: number; y: number }[] = [];
+    for (let bj = 0; bj < GRID / B; bj++)
+      for (let bi = 0; bi < GRID / B; bi++) {
+        let n = 0, x = 0, y = 0;
+        for (let j = bj * B; j < bj * B + B; j++)
+          for (let i = bi * B; i < bi * B + B; i++) {
+            const k = j * GRID + i;
+            if (!this.opaque[k] || this.painted[k]) continue;
+            n++;
+            x += i + 0.5;
+            y += j + 0.5;
+          }
+        if (n >= 2) blocks.push({ n, x: x / n, y: y / n });
+      }
+    blocks.sort((p, q) => q.n - p.n);
+    const world = this.go.scene.world;
+    const out: Point[] = [];
+    for (const b of blocks) {
+      const lx = (b.x / GRID - s.anchor.x) * this.texW;
+      const ly = (b.y / GRID - s.anchor.y) * this.texH;
+      const p = world.toLocal(s.toGlobal(new Point(lx, ly)));
+      // one marker per area: skip blocks right next to one already shown
+      if (out.some((o) => Math.hypot(o.x - p.x, o.y - p.y) < 0.9)) continue;
+      out.push(p);
+      if (out.length >= max) break;
+    }
+    return out;
+  }
+
   /** SetScratchCardMode: switch between fill (1) and erase (0); progress counts from now on. */
   setMode(m: number): void {
     if (m === this.mode) return;

@@ -6,14 +6,36 @@ let master: GainNode | null = null;
 const buffers = new Map<string, Promise<AudioBuffer | null>>();
 let muted = false;
 
-export function unlockAudio(): void {
+function ensureCtx(): void {
   if (!ctx) {
     ctx = new AudioContext();
     master = ctx.createGain();
     master.gain.value = muted ? 0 : 1;
     master.connect(ctx.destination);
   }
-  if (ctx.state === 'suspended') void ctx.resume();
+}
+
+export function unlockAudio(): void {
+  ensureCtx();
+  if (ctx!.state === 'suspended') void ctx!.resume();
+}
+
+/** Fetch + decode a level's clips up front: a sound decoded on its first use comes late. */
+export function preloadAudio(names: Iterable<string>): void {
+  try {
+    ensureCtx(); // a context made before any tap starts suspended, but it can decode
+  } catch {
+    return;
+  }
+  for (const n of names) void load(n);
+}
+
+/** Every looping sound still playing. */
+const loops = new Set<Voice>();
+
+/** Stop every loop (end of a step / level): no loop outlives the job that started it. */
+export function stopLoops(fade = 0.2): void {
+  for (const v of [...loops]) v.stop(fade);
 }
 
 export function setMuted(m: boolean): void {
@@ -42,11 +64,16 @@ export function play(name: string, opts: { loop?: boolean; volume?: number } = {
   let src: AudioBufferSourceNode | null = null;
   let gain: GainNode | null = null;
   let stopped = false;
-  if (ctx && master) {
+  const asked = ctx ? ctx.currentTime : 0;
+  // before the first tap the context is still asleep: one-shots asked then would all burst out
+  // at once on the first tap
+  if (ctx && master && (opts.loop || ctx.state === 'running')) {
     const c = ctx;
     const out = master;
     void load(name).then((buf) => {
       if (!buf || stopped) return;
+      // a one-shot that could not start in time would sound after the action: skip it
+      if (!opts.loop && c.currentTime - asked > 0.3) return;
       src = c.createBufferSource();
       src.buffer = buf;
       src.loop = !!opts.loop;
@@ -56,10 +83,11 @@ export function play(name: string, opts: { loop?: boolean; volume?: number } = {
       src.start();
     });
   }
-  return {
+  const voice: Voice = {
     stop(fade = 0) {
       if (stopped) return;
       stopped = true;
+      loops.delete(voice);
       try {
         if (fade > 0 && ctx && gain && src) {
           const t = ctx.currentTime;
@@ -72,4 +100,6 @@ export function play(name: string, opts: { loop?: boolean; volume?: number } = {
       }
     },
   };
+  if (opts.loop) loops.add(voice);
+  return voice;
 }

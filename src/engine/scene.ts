@@ -2,12 +2,18 @@
 // World units are Unity units (y up). Every renderer is drawn through one RenderLayer
 // sorted like Unity's sorting (layer, order, SortingGroup), while its transform and
 // visibility still come from the GameObject hierarchy.
-import { Assets, Container, Matrix, NineSliceSprite, Point, RenderLayer, Sprite, Texture, TilingSprite } from 'pixi.js';
+import { Assets, Container, MaskFilter, Matrix, NineSliceSprite, Point, RenderLayer, Sprite, Texture, TilingSprite } from 'pixi.js';
 import { Spine } from '@esotericsoftware/spine-pixi-v8';
 import { isRef, num, type CompData, type LevelData, type NodeData, type Ref, type SpriteMeta } from './types';
 import { FOAM_KEY } from './scratch';
 
 const BASE = import.meta.env.BASE_URL + 'data/';
+
+// Pixi draws a sprite-masked object into a texture as big as the object, not cut to the screen
+// (MaskFilter turns clipToViewport off). Camera zooms (level transitions zoom right into a point)
+// blow that up to 16k px textures and ~600 MB: phones kill the page and it reloads at step 1.
+// Only the part on screen is ever seen, so masks are clipped to the screen like other filters.
+Object.defineProperty(MaskFilter.prototype, 'clipToViewport', { get: () => true, set: () => {}, configurable: true });
 
 export interface Collider {
   kind: 'box' | 'circle' | 'poly';
