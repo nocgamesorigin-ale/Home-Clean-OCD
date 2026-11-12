@@ -8,7 +8,7 @@ let muted = false;
 
 function ensureCtx(): void {
   if (!ctx) {
-    ctx = new AudioContext();
+    ctx = new AudioContext({ latencyHint: 'interactive' });
     master = ctx.createGain();
     master.gain.value = muted ? 0 : 1;
     master.connect(ctx.destination);
@@ -49,10 +49,32 @@ function load(name: string): Promise<AudioBuffer | null> {
     p = fetch(BASE + encodeURIComponent(name) + '.mp3')
       .then((r) => (r.ok ? r.arrayBuffer() : Promise.reject(new Error(name))))
       .then((b) => ctx!.decodeAudioData(b))
+      .then((buf) => (trims.set(buf, edges(buf)), buf))
       .catch(() => null);
     buffers.set(name, p);
   }
   return p;
+}
+
+/** Where the sound really starts and ends in each clip: MP3s carry 30-330 ms of silence at the
+ * head (the sound comes after the action) and tail (a gap at every loop point). */
+const trims = new WeakMap<AudioBuffer, { start: number; end: number }>();
+
+function edges(buf: AudioBuffer): { start: number; end: number } {
+  const ch = Array.from({ length: buf.numberOfChannels }, (_, i) => buf.getChannelData(i));
+  const loud = (i: number) => ch.some((d) => Math.abs(d[i]) > 0.01);
+  const n = buf.length;
+  const maxHead = Math.min(n, Math.round(buf.sampleRate * 0.4));
+  let a = 0;
+  while (a < maxHead && !loud(a)) a++;
+  if (a >= maxHead) a = 0; // a quiet clip: keep it whole
+  let b = n - 1;
+  const minTail = Math.max(a, n - Math.round(buf.sampleRate * 0.4));
+  while (b > minTail && !loud(b)) b--;
+  // keep a few ms before the attack so it is not cut
+  const start = Math.max(0, a / buf.sampleRate - 0.004);
+  const end = Math.min(buf.duration, (b + 1) / buf.sampleRate + 0.004);
+  return end - start > 0.05 ? { start, end } : { start: 0, end: buf.duration };
 }
 
 export interface Voice {
@@ -77,10 +99,18 @@ export function play(name: string, opts: { loop?: boolean; volume?: number } = {
       src = c.createBufferSource();
       src.buffer = buf;
       src.loop = !!opts.loop;
+      const tr = trims.get(buf) ?? { start: 0, end: buf.duration };
+      if (src.loop) {
+        src.loopStart = tr.start;
+        src.loopEnd = tr.end;
+      }
       const g = (gain = c.createGain());
-      g.gain.value = opts.volume ?? 1;
+      const vol = opts.volume ?? 1;
+      // a short fade-in: the trimmed head starts right on the sound, without a click
+      g.gain.setValueAtTime(0, c.currentTime);
+      g.gain.linearRampToValueAtTime(vol, c.currentTime + 0.004);
       src.connect(g).connect(out);
-      src.start();
+      src.start(0, tr.start);
     });
   }
   const voice: Voice = {
@@ -91,6 +121,7 @@ export function play(name: string, opts: { loop?: boolean; volume?: number } = {
       try {
         if (fade > 0 && ctx && gain && src) {
           const t = ctx.currentTime;
+          gain.gain.cancelScheduledValues(t);
           gain.gain.setValueAtTime(gain.gain.value, t);
           gain.gain.linearRampToValueAtTime(0, t + fade);
           src.stop(t + fade + 0.02);

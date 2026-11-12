@@ -7,7 +7,7 @@
 //    until they finish.
 // A "holder" GameObject (ActionsOnDoneHolder, TweenOnTrigger, a DragColliderTarget...)
 // runs its children's actions the same way when its event fires.
-import { Assets, Graphics, Point, Rectangle, type Application, type Texture } from 'pixi.js';
+import { Assets, Graphics, Matrix, Point, Rectangle, type Application, type Texture } from 'pixi.js';
 import { play, stopLoops, type Voice } from './audio';
 import type { GO, Scene } from './scene';
 import { ScratchCard } from './scratch';
@@ -46,6 +46,8 @@ interface Task {
   onMove?(item: GO): void;
   /** Called on release; return true when the item was used (no snap back). */
   onRelease?(item: GO): boolean;
+  /** a stuck thing (PluckItem) pulled past its limit pops off toward `dir` (world units) */
+  onPluck?(item: GO, dir: Point): void;
   /** Tap tasks: a tap at a world point. */
   onTap?(p: Point): void;
   /** Hold tasks: called every frame while the finger is down (world point). */
@@ -75,6 +77,8 @@ export class Runtime {
   private hold: { task: Task; p: Point } | null = null;
   /** SetActiveCamZone: the player may pan the camera with a free finger. */
   private camZone: { h: boolean; v: boolean } | null = null;
+  /** SetVirtualCamera: the Cinemachine camera in charge (its confiner bounds the panning). */
+  private vcam: GO | null = null;
   private pan: { x: number; y: number; cx: number; cy: number } | null = null;
   private voices = new Map<string, Voice>();
   private cards = new Map<string, ScratchCard>();
@@ -85,7 +89,7 @@ export class Runtime {
   /** Called for every step start, for the HUD. */
   onStep?: (name: string, index: number, total: number) => void;
   /** A decoration / style was picked (object namecode, option namecode), for the home rooms. */
-  onChoice?: (obj: string, option: string) => void;
+  onChoice?: (obj: string, option: string, index: number) => void;
   /** Step names of the level, and the one being played. */
   stepNames: string[] = [];
   stepIndex = 0;
@@ -846,6 +850,9 @@ export class Runtime {
         this.badge.show(tex);
         return;
       }
+      case 'SetVirtualCamera':
+        this.vcam = isRef(c.cinemachineCamera) ? (this.scene.get(c.cinemachineCamera as Ref) ?? null) : null;
+        return;
       case 'SetActiveCamZone':
         this.camZone = c.m_IsActive ? { h: !!c.m_HorizontalMove, v: !!c.m_VerticalMove } : null;
         return;
@@ -1157,6 +1164,20 @@ export class Runtime {
             task.finish();
           }
         };
+        task.onPluck = (m, dir) => {
+          this.dropDrag();
+          const p0 = m.worldPos();
+          const r0 = m.view.rotation;
+          // it flies off the way it was pulled, turning a little, and fades
+          void this.tween(0.45, (k) => {
+            const e = 1 - (1 - k) * (1 - k);
+            m.setWorldPos(p0.x + dir.x * 1.6 * e, p0.y + dir.y * 1.6 * e - 0.6 * k * k);
+            m.view.rotation = r0 - Math.sign(dir.x || 1) * 0.5 * e;
+            m.view.alpha = 1 - k * k;
+          }).then(() => m.setActive(false));
+          void this.runHolder(c.ActionsOnDoneHolder);
+          task.finish();
+        };
         task.goals = () => {
           const p = it.worldPos();
           return [new Point(p.x + max, p.y + max)];
@@ -1187,10 +1208,16 @@ export class Runtime {
           };
         }
         const seen = new Set<number>();
-        const slots = refs(c.m_ListSlot)
+        let slots = refs(c.m_ListSlot)
           .filter((r) => !seen.has(r.go) && seen.add(r.go))
           .map((r) => ({ go: this.scene.get(r)!, comp: this.scene.compOf(r) }))
           .filter((s) => s.go);
+        // m_TransformToGetSlot: the original fills the list at run time from that object's children
+        const holder = this.item(c.m_TransformToGetSlot);
+        if (!slots.length && holder)
+          slots = descendants(holder)
+            .filter((o) => o.comp('DragMultiSlotTargetSlot'))
+            .map((o) => ({ go: o, comp: o.comp('DragMultiSlotTargetSlot') }));
         if (!items.length || !slots.length) return null;
         const fired = new Set<GO>();
         // slots switched off by the level do not have to be touched
@@ -1198,10 +1225,14 @@ export class Runtime {
         // m_CompleteBySlot: how many slots finish the task (0 = all). A scrape over 136 debris
         // points needs only a few: the scratch card next to it decides when the job is done
         const needN = Math.max(0, num(c.m_CompleteBySlot));
-        const enough = () => allDone() || (needN > 0 && fired.size >= needN);
+        // a spray / scrape over many points (foam spots, debris): 80% of them finish the job and
+        // the rest follow by themselves; a few slots to put things in all count
+        const many = slots.length >= 6 && needN === 0;
+        const live = () => slots.filter((s) => fired.has(s.go) || s.go.selfActive).length;
+        const enough = () => allDone() || (needN > 0 && fired.size >= needN) || (many && fired.size >= Math.ceil(live() * AUTO_DONE));
         task.items = items;
         task.progress = () =>
-          needN > 0 ? Math.min(1, fired.size / needN) : fired.size / Math.max(1, slots.filter((s) => fired.has(s.go) || s.go.selfActive).length);
+          needN > 0 ? Math.min(1, fired.size / needN) : Math.min(1, fired.size / Math.max(1, live() * (many ? AUTO_DONE : 1)));
         const fire = (m: GO) => {
           for (const s of slots) {
             if (fired.has(s.go) || !s.go.selfActive) continue;
@@ -1227,6 +1258,17 @@ export class Runtime {
         const done = () => {
           if (task.done) return;
           task.finish();
+          if (many && !allDone()) {
+            // the last 20% play by themselves, one after another, without their sounds
+            let i = 0;
+            for (const s of slots) {
+              if (fired.has(s.go) || !s.go.selfActive) continue;
+              fired.add(s.go);
+              const h = this.scene.get(s.comp?.m_TweenOnTriggerHolder as Ref);
+              if (h) void this.sleep(0.04 * i++).then(() => this.runList(h.children.filter((ch) => !ch.comps().some((cc) => /^(PlayAudio|PlayVibration)/.test(cc.t)))));
+            }
+            return;
+          }
           // the slots still react (debris, sounds) while the tool keeps working in this step
           if (!allDone()) this.lingering.push({ items, onMove: fire });
         };
@@ -1358,9 +1400,13 @@ export class Runtime {
             best = avg;
             gainAt = this.time;
           }
-          const stalled = avg >= 0.75 && this.time - gainAt > 1.2;
-          if (stalled || avg >= 0.96 || cards.every((k) => k.progress >= need(k))) {
-            cards.forEach((k) => k.complete());
+          // 80% of the job done: the rest cleans itself (a quick fade), no hunting for the last bits
+          const stalled = avg >= 0.7 && this.time - gainAt > 1.2;
+          if (stalled || avg >= AUTO_DONE || cards.every((k) => k.progress >= need(k))) {
+            // (a card the next step switches to the other mode meanwhile is left alone)
+            const modes = cards.map((k) => k.mode);
+            const same = (k: ScratchCard, i: number) => k.mode === modes[i];
+            void this.tween(0.45, () => cards.forEach((k, i) => same(k, i) && k.fadeRest(0.16))).then(() => cards.forEach((k, i) => same(k, i) && k.complete()));
             void this.runHolder(c.actionHolder);
             void this.runHolder(c.m_OnDoneScratch);
             task.finish();
@@ -1423,7 +1469,7 @@ export class Runtime {
         void this.ui.choose(opts, c.t === 'ChooseOptionTool' ? 'Chọn dụng cụ' : 'Chọn một kiểu').then(async (o) => {
           this.lastChoice = o;
           const nc = o.comps().find((x) => 'namecode' in x)?.namecode as string | undefined;
-          if (c.m_ObjNamecode && nc) this.onChoice?.(c.m_ObjNamecode as string, nc);
+          if (c.m_ObjNamecode && nc) this.onChoice?.(c.m_ObjNamecode as string, nc, opts.indexOf(o));
           const idx = Math.max(0, opts.indexOf(o));
           const deco = g.comp('DropEffectDeco');
           if (deco) {
@@ -1572,15 +1618,71 @@ export class Runtime {
       case 'BookCurlObject': {
         const curls = this.gosOf(c.m_ListBookCurl);
         if (!curls.length) return null;
-        let i = 0;
-        const next = () => {
-          const bc = curls[i++];
-          play('Peel_Tape');
-          void this.runHolder(bc?.comp('BookCurl')?.m_TweenOnDoneHolder);
-          if (i >= curls.length) void this.sleep(0.4).then(task.finish);
+        // the original peels a copy of each sticker drawn by a UI "book" (page curl), which the web
+        // does not draw: the sticker's own sprite (same picture) is peeled off with the finger instead
+        const pageOf = (bc: GO) => {
+          const book = this.scene.get(bc.comp('BookCurl')?.m_Book as Ref)?.comp('Book');
+          return (book?.bookPages as { sprite?: string }[] | undefined)?.find((pg) => pg?.sprite)?.sprite;
         };
-        task.onTap = () => next();
-        task.taps = () => [new Point(this.scene.camX, this.scene.camY)];
+        // the stickers of the step, in the curls' order: the ones it outlines, else the ones it hid
+        const sibs = g.parent?.children ?? [];
+        const listed = (pick: (x: CompData) => boolean, field: string) =>
+          sibs.flatMap((o) => o.comps().filter(pick).flatMap((x) => this.gosOf(x[field]))).filter((o) => o.sprite);
+        const outlined = listed((x) => x.t === 'EnableOutlineSprite' && !!x.IsActive, 'm_ListSpriteRenderer');
+        const hidden = listed((x) => x.t === 'SetActiveGameObject' && !x.m_Active, 'm_ListGameObject');
+        const order = outlined.length === curls.length ? outlined : hidden.length === curls.length ? hidden : [];
+        const used = new Set<GO>();
+        const pairs = curls.map((bc, i) => {
+          const sp = pageOf(bc);
+          const go = order[i] ?? (sp ? this.scene.gos.find((o) => !used.has(o) && o.comp('SpriteRenderer')?.sprite === sp) : undefined);
+          if (go) used.add(go);
+          return { bc, go };
+        });
+        let left = curls.length;
+        task.progress = () => 1 - left / curls.length;
+        const peelOff = (bc: GO, go?: GO, dir = new Point(0.4, 0.6)) => {
+          const done = this.scene.get(bc.comp('BookCurl')?.m_TweenOnDoneHolder as Ref);
+          if (!done?.children.some((x) => x.comp('PlayAudio'))) play('Peel_Tape');
+          void this.runHolder(bc.comp('BookCurl')?.m_TweenOnDoneHolder);
+          if (go) {
+            const p0 = go.worldPos();
+            const r0 = go.view.rotation;
+            // it comes away the way it was pulled, then drops, turning, and fades
+            void this.tween(0.9, (k) => {
+              const e = 1 - (1 - k) * (1 - k);
+              go.setWorldPos(p0.x + dir.x * 0.9 * e, p0.y + dir.y * 0.9 * e - 3.2 * k * k);
+              go.view.rotation = r0 + Math.sign(dir.x || 1) * 0.9 * e;
+              go.view.alpha = 1 - k * k;
+            }).then(() => go.setActive(false));
+          }
+          if (--left <= 0) void this.sleep(0.5).then(task.finish);
+        };
+        const own = pairs.filter((x): x is { bc: GO; go: GO } => !!x.go);
+        if (own.length) {
+          for (const x of own) x.go.setActive(true); // the step hid them for the book copies
+          task.items = own.map((x) => x.go);
+          task.onPluck = (m, dir) => {
+            const x = own.find((y) => y.go === m);
+            if (!x) return;
+            this.dropDrag();
+            task.items = task.items.filter((y) => y !== m);
+            peelOff(x.bc, m, dir);
+          };
+          task.goals = () => task.items.filter((y) => y.activeInHierarchy).map((y) => y.worldPos());
+          task.auto = () => {
+            for (const m of [...task.items]) task.onPluck!(m, new Point(0.4, 0.6));
+          };
+        }
+        // a sticker with no picture of its own: a tap peels it
+        const bare = pairs.filter((x) => !x.go);
+        if (bare.length) {
+          let j = 0;
+          task.onTap = () => {
+            const x = bare[j++];
+            if (x) peelOff(x.bc);
+          };
+          task.taps = () => [new Point(this.scene.camX, this.scene.camY)];
+        }
         return task;
       }
       case 'FlySwatter': {
@@ -2357,6 +2459,127 @@ export class Runtime {
 
   // ---- input ----------------------------------------------------------------
 
+  /** A stuck thing being pulled: it stays put and stretches toward the finger, then pops off. */
+  private pull: { item: GO; base: Matrix; anchor: Point; popAt: number; maxScale: number; root: boolean; half: number; k: number; dir: Point } | null = null;
+  /** things already pulled off: they are carried normally from then on */
+  private pulledOff = new Set<GO>();
+  private lastPtr = new Point();
+
+  private startPull(it: GO): void {
+    this.pull = null;
+    const pi = it.comp('PluckItem');
+    // snails / leeches cling to the surface the first time they are picked up
+    const clings = !pi && /snail|leech|slug|worm/i.test(it.name);
+    // a sticker / tape peeled off with the finger
+    const sticker = !pi && this.tasks.some((t) => !t.done && t.items.includes(it) && t.onPluck);
+    if ((!pi && !clings && !sticker) || this.pulledOff.has(it)) return;
+    const v = it.view;
+    v.updateLocalTransform();
+    const b = v.getBounds();
+    const k = this.scene.world.scale.x;
+    this.pull = {
+      item: it,
+      base: v.localTransform.clone(),
+      anchor: it.worldPos(),
+      // PluckItem.maxDistance is the full pull; it gives way a little before the end
+      popAt: pi ? num(pi.maxDistance, 3) * 0.5 : sticker ? 0.8 : 1.0,
+      maxScale: pi ? num(pi.maxScale, 2) : sticker ? 1.35 : 1.7,
+      root: !!pi,
+      half: Math.min(b.width, b.height) / k / 2,
+      k: 0,
+      dir: new Point(0, 1),
+    };
+  }
+
+  /** Bend the pulled thing toward `to` (world). True once it has popped off. */
+  private stretchTo(to: Point): boolean {
+    const P = this.pull!;
+    const dx = to.x - P.anchor.x;
+    const dy = to.y - P.anchor.y;
+    const d = Math.hypot(dx, dy);
+    if (d > 1e-4) P.dir.set(dx / d, dy / d);
+    if (d >= P.popAt) {
+      this.popPull();
+      return true;
+    }
+    this.bend(d / P.popAt);
+    return false;
+  }
+
+  /** Draw the pull at strength k (0 = at rest, 1 = about to pop). */
+  private bend(k: number): void {
+    const P = this.pull;
+    if (!P) return;
+    P.k = k;
+    const v = P.item.view;
+    const par = v.parent;
+    if (!par) return;
+    const toPar = (wx: number, wy: number) => par.toLocal(this.scene.world.toGlobal(new Point(wx, wy)));
+    const a0 = toPar(P.anchor.x, P.anchor.y);
+    const a1 = toPar(P.anchor.x + P.dir.x, P.anchor.y + P.dir.y);
+    const unit = Math.hypot(a1.x - a0.x, a1.y - a0.y) || 1;
+    const ux = (a1.x - a0.x) / unit;
+    const uy = (a1.y - a0.y) / unit;
+    const e = 1 - (1 - k) * (1 - k);
+    const sa = 1 + (P.maxScale - 1) * 0.6 * e; // along the pull
+    const sc = 1 / Math.sqrt(sa); // thinner across (keeps its volume)
+    const m = new Matrix(
+      1 + (sa - 1) * ux * ux + (sc - 1) * uy * uy,
+      (sa - 1) * ux * uy - (sc - 1) * ux * uy,
+      (sa - 1) * ux * uy - (sc - 1) * ux * uy,
+      1 + (sa - 1) * uy * uy + (sc - 1) * ux * ux,
+      0,
+      0,
+    );
+    // a mushroom stretches from its root; a creature from its far side, its head following the finger
+    const h = P.root ? 0 : P.half * unit;
+    const px = a0.x - ux * h;
+    const py = a0.y - uy * h;
+    m.tx = px - (m.a * px + m.c * py);
+    m.ty = py - (m.b * px + m.d * py);
+    v.setFromMatrix(m.append(P.base));
+  }
+
+  private popPull(): void {
+    const P = this.pull!;
+    this.pull = null;
+    this.pulledOff.add(P.item);
+    P.item.view.setFromMatrix(P.base);
+    play('Peel', { volume: 0.7 });
+    const pluck = this.tasks.find((t) => !t.done && t.items.includes(P.item) && t.onPluck);
+    if (pluck) {
+      pluck.onPluck!(P.item, P.dir.clone());
+      return;
+    }
+    // it comes off and catches up with the finger
+    const d = this.drag;
+    if (!d) return;
+    const from = new Point(P.anchor.x - this.lastPtr.x, P.anchor.y - this.lastPtr.y);
+    const goal = d.grab.clone();
+    void this.tween(0.14, (k) => {
+      if (this.drag !== d) return;
+      d.grab.set(from.x + (goal.x - from.x) * k, from.y + (goal.y - from.y) * k);
+      d.item.setWorldPos(this.lastPtr.x + d.grab.x, this.lastPtr.y + d.grab.y);
+    });
+  }
+
+  /** Let go before it popped: it springs back. */
+  private releasePull(): void {
+    const P = this.pull;
+    if (!P) return;
+    const k0 = P.k;
+    void this.tween(0.3, (k) => {
+      if (this.pull !== P) return;
+      // a damped wobble back to rest
+      this.bend(k0 * Math.cos(k * Math.PI * 1.5) * (1 - k));
+    }).then(() => {
+      if (this.pull === P) {
+        P.item.view.setFromMatrix(P.base);
+        this.pull = null;
+      }
+    });
+  }
+
   pointerDown(x: number, y: number): void {
     this.idle = 0;
     this.hint.hide();
@@ -2383,6 +2606,7 @@ export class Runtime {
     const ip = best.it.worldPos();
     this.moveGen.set(best.it.id, (this.moveGen.get(best.it.id) ?? 0) + 1);
     this.drag = { item: best.it, task: best.task, grab: new Point(ip.x - p.x, ip.y - p.y), start: ip, moved: 0 };
+    this.startPull(best.it);
     this.runDragList(best.it, 'm_ListTweenStartDrag');
     for (const t of this.tasks) if (t.items.includes(best.it)) t.onGrab?.(best.it);
     play('Pick_Items', { volume: 0.6 });
@@ -2399,6 +2623,9 @@ export class Runtime {
     }
     if (!this.drag) return;
     const p = this.scene.toWorld(x, y);
+    this.lastPtr = p;
+    if (this.pull && this.pull.item === this.drag.item && !this.stretchTo(new Point(p.x + this.drag.grab.x, p.y + this.drag.grab.y))) return;
+    if (!this.drag) return; // plucked off and gone
     const before = this.drag.item.worldPos();
     this.drag.item.setWorldPos(p.x + this.drag.grab.x, p.y + this.drag.grab.y);
     this.drag.moved++;
@@ -2420,9 +2647,26 @@ export class Runtime {
     }
   }
 
-  /** How far the camera may pan: the confiner/zone collider, else the level's drawing. */
+  /** How far the camera may pan: the active virtual camera's confiner shape, else the bounds
+   * shape the camera stands in, else the level's drawing. The view never leaves the shape. */
   private camLimits(): { x0: number; x1: number; y0: number; y1: number } {
-    const zone = this.scene.gos.find((g) => (g.comp('CinemachineConfiner2D') || g.comp('CamLimitedZone')) && g.colliders.length);
+    const shapeOf = (g: GO): GO | undefined => {
+      const c = g.comp('CinemachineConfiner2D') ?? g.comp('VCamConfinedMovement');
+      const r = c?.BoundingShape2D ?? c?.confinerCollider;
+      return isRef(r) ? this.scene.get(r as Ref) : undefined;
+    };
+    let zone = this.vcam ? shapeOf(this.vcam) : undefined;
+    if (!zone?.colliders.length) {
+      const shapes = this.scene.gos
+        .map((g) => shapeOf(g) ?? (g.comp('CamLimitedZone') && g.colliders.length ? g : undefined))
+        .filter((g): g is GO => !!g?.colliders.length);
+      const c = this.scene.world.toGlobal(new Point(this.scene.camX, this.scene.camY));
+      const dist = (g: GO) => {
+        const r = this.rect(g);
+        return Math.hypot(Math.max(r.x - c.x, 0, c.x - r.x - r.width), Math.max(r.y - c.y, 0, c.y - r.y - r.height));
+      };
+      zone = shapes.sort((p, q) => dist(p) - dist(q))[0];
+    }
     const w = this.app.screen.width;
     const h = this.app.screen.height;
     const k = this.scene.world.scale.x;
@@ -2431,7 +2675,12 @@ export class Runtime {
     const b = this.scene.world.toLocal(new Point(r.x + r.width, r.y));
     const hw = w / 2 / k;
     const hh = h / 2 / k;
-    return { x0: Math.min(a.x + hw, b.x - hw), x1: Math.max(a.x + hw, b.x - hw), y0: Math.min(a.y + hh, b.y - hh), y1: Math.max(a.y + hh, b.y - hh) };
+    // a shape narrower than the screen holds the camera at its middle
+    const span = (lo: number, hi: number, half: number): [number, number] =>
+      lo + half <= hi - half ? [lo + half, hi - half] : [(lo + hi) / 2, (lo + hi) / 2];
+    const [x0, x1] = span(Math.min(a.x, b.x), Math.max(a.x, b.x), hw);
+    const [y0, y1] = span(Math.min(a.y, b.y), Math.max(a.y, b.y), hh);
+    return { x0, x1, y0, y1 };
   }
 
   /** A tool's own start/end-drag actions: its spray, sounds, animations. */
@@ -2551,10 +2800,13 @@ export class Runtime {
     const d = this.drag;
     if (!d) return;
     this.drag = null;
+    this.releasePull();
     this.runDragList(d.item, 'm_ListTweenEndDrag');
     let used = false;
     for (const t of [...this.tasks]) if (!t.done && t.items.includes(d.item)) used = (t.onRelease?.(d.item) ?? false) || used;
     if (!used && d.item.activeInHierarchy) {
+      // back where it clung: it clings again
+      this.pulledOff.delete(d.item);
       const di = d.item.comps().find((x) => 'm_ListTweenOnDoneSnapToBasePos' in x);
       void this.moveTo(d.item, d.start, num(di?.returnDuration, 0.3), true).then((ok) => ok && this.runRefs(di?.m_ListTweenOnDoneSnapToBasePos));
     }
@@ -2698,6 +2950,9 @@ function descendants(g: GO): GO[] {
 function key(r: Ref): string {
   return `${r.go}:${r.comp ?? -1}`;
 }
+
+/** Share of a cleaning job (scrub, foam spots) after which the rest finishes by itself. */
+const AUTO_DONE = 0.8;
 
 function clamp(v: number, a: number, b: number): number {
   return Math.max(a, Math.min(b, v));

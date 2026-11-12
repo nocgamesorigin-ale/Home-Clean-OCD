@@ -125,7 +125,7 @@ export class Scene {
     return this.gos.find((g) => g.name === name);
   }
 
-  async build(spriteMeta: Record<string, SpriteMeta>, spineMeta: Record<string, { scale: number }>): Promise<void> {
+  async build(spriteMeta: Record<string, SpriteMeta>, spineMeta: Record<string, { scale: number }>, onProgress?: (f: number) => void): Promise<void> {
     const nodes = this.level.nodes;
     // load every texture and skeleton the level uses
     const spriteKeys = new Set<string>();
@@ -153,7 +153,8 @@ export class Scene {
           { alias: 'a:' + k, src: `${BASE}spine/${k}.atlas` },
         ]),
       );
-    await Promise.allSettled(jobs);
+    let settled = 0;
+    await Promise.allSettled(jobs.map((j) => j.finally(() => onProgress?.(++settled / jobs.length))));
 
     nodes.forEach((n, i) => {
       const g = new GO(i, n);

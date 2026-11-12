@@ -79,6 +79,9 @@ export const progress = {
       localStorage.removeItem(DONE_KEY);
       localStorage.removeItem(SEEN_KEY);
       localStorage.removeItem(UNLOCK_KEY);
+      localStorage.removeItem('home-clean-web.picks');
+      localStorage.removeItem('home-clean-web.choices');
+      localStorage.removeItem('home-clean-web.deco');
     } catch {
       /* private mode */
     }

@@ -32,9 +32,48 @@ function writeMap(k: string, obj: string, option: string): void {
   }
 }
 
-/** A style picked inside a level (object namecode -> option namecode). */
-export function saveChoice(obj: string, option: string): void {
-  writeMap(CHOICE_KEY, obj, option);
+/** Styles picked inside levels, per level and object ("L_Carpet|Carpet"): every pick with its
+ * position in the picker and when it was made. The same object namecode is used in several rooms
+ * (Floor, Table, Wall...) and some objects are picked twice (a carpet's shape, then its colour). */
+const PICKS_KEY = 'home-clean-web.picks';
+type Pick = { o: string; i: number; t: number };
+
+function readPicks(): Record<string, Pick[]> {
+  try {
+    return JSON.parse(localStorage.getItem(PICKS_KEY) ?? '{}') as Record<string, Pick[]>;
+  } catch {
+    return {};
+  }
+}
+
+export function saveChoice(level: string, obj: string, option: string, index: number): void {
+  try {
+    const m = readPicks();
+    const k = `${level}|${obj}`;
+    m[k] = [...(m[k] ?? []).filter((p) => p.o !== option).slice(-5), { o: option, i: Math.max(0, index), t: Date.now() }];
+    localStorage.setItem(PICKS_KEY, JSON.stringify(m));
+  } catch {
+    /* private mode */
+  }
+}
+
+/** The style to show for an object of the room: the latest pick made in its level that is one
+ * of the room's options (by name, else by position in the picker), else the first option. */
+function pickedOption(chLevels: string[], level: string | undefined, obj: string, options: string[]): string | undefined {
+  if (!options.length) return undefined;
+  const m = readPicks();
+  const set = new Set(options);
+  const latest = (ps: Pick[]) => [...ps].sort((a, b) => b.t - a.t);
+  let picks = level ? (m[`${level}|${obj}`] ?? []) : [];
+  // the object is picked in another level of this room (a bathtub faucet, a sink faucet)
+  if (!picks.length) picks = chLevels.flatMap((l) => m[`${l}|${obj}`] ?? []);
+  const byName = latest(picks).find((p) => set.has(p.o));
+  if (byName) return byName.o;
+  const byIndex = latest(picks)[0];
+  if (byIndex) return options[Math.min(byIndex.i, options.length - 1)];
+  // saved by an older version: object namecode -> option
+  const old = readMap(CHOICE_KEY)[obj];
+  return old && set.has(old) ? old : options[0];
 }
 
 export interface RoomArgs {
@@ -52,6 +91,9 @@ export interface RoomArgs {
   layers: { id: number }[];
   /** Level just finished: its object changes in front of the player. */
   fresh?: string | null;
+  /** loading screen: share of the room's files loaded, and the room is on screen */
+  onLoad?: (f: number) => void;
+  ready?: () => void;
 }
 
 /** One object of the room, i.e. one level. */
@@ -109,6 +151,7 @@ export async function showRoom(a: RoomArgs): Promise<void> {
   const decoDone = progress.seen().has(decoKey);
 
   const room = a.overview ? await sceneRoom(a, shown) : await pictureRoom(a, shown);
+  a.ready?.();
   let ui: HTMLDivElement | null = null;
   const { view, objs } = room;
   if (!room.node.parent) app.stage.addChildAt(room.node, 0);
@@ -374,7 +417,7 @@ async function sceneRoom(a: RoomArgs, shown: Set<string>): Promise<Room> {
   const { app, ch } = a;
   const scene = new Scene(a.overview!, a.layers);
   scene.spriteMetaOf = (k) => a.spriteMeta[k];
-  await scene.build(a.spriteMeta, a.spineMeta);
+  await scene.build(a.spriteMeta, a.spineMeta, a.onLoad);
   // the scene goes under the runtime's own overlays (option picker, tool badge)
   app.stage.addChildAt(scene.root, 0);
   const rt = new Runtime(scene, app);
@@ -503,8 +546,12 @@ async function sceneRoom(a: RoomArgs, shown: Set<string>): Promise<Room> {
 
   // ---- states ----
   const want = (gr: Group) => {
-    const picked = readMap(CHOICE_KEY);
-    return picked[gr.namecode] ?? gr.options[0]?.nc;
+    return pickedOption(
+      ch.levels.map((l) => l.file),
+      gr.level,
+      gr.namecode,
+      gr.options.map((o) => o.nc),
+    );
   };
   const apply = (gr: Group, on: boolean) => {
     for (const g of gr.before) g.setActive(!on);

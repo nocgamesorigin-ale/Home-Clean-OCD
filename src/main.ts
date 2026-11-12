@@ -34,14 +34,48 @@ export function safeArea(): { top: number; bottom: number } {
   return out;
 }
 
+/** The loading screen (in index.html, so it shows before the code runs): a bar that eases toward
+ * the real share of files loaded, and a fade when the game is ready. */
+const load = { target: 0.05, shown: 0, raf: 0 };
+function loadingProgress(f: number): void {
+  load.target = Math.max(load.target, Math.min(1, f));
+}
 function loading(on: boolean): void {
   let el = document.getElementById('loading');
-  if (on && !el) {
-    el = document.createElement('div');
-    el.id = 'loading';
-    el.innerHTML = `<img src="${BASE}story/Logo.webp" alt=""><div class="spin"></div><p>Đang tải…</p>`;
-    document.body.appendChild(el);
-  } else if (!on) el?.remove();
+  if (on) {
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'loading';
+      el.innerHTML = `<img src="${BASE}story/Logo.webp" alt=""><div class="foot"><div class="bar"><i></i></div><p>Đang tải… 0%</p></div>`;
+      document.body.appendChild(el);
+    }
+    el.classList.remove('hide');
+    const bar = el.querySelector<HTMLElement>('.bar i');
+    const txt = el.querySelector<HTMLElement>('p');
+    cancelAnimationFrame(load.raf);
+    const tick = () => {
+      // creeps on its own while a big file loads, never past what is really done + a bit
+      load.target = Math.min(0.97, Math.max(load.target, load.shown + 0.0015));
+      load.shown += (load.target - load.shown) * 0.12;
+      if (bar) bar.style.width = `${(load.shown * 100).toFixed(1)}%`;
+      if (txt) txt.textContent = `Đang tải… ${Math.round(load.shown * 100)}%`;
+      load.raf = requestAnimationFrame(tick);
+    };
+    tick();
+    return;
+  }
+  if (!el) return;
+  cancelAnimationFrame(load.raf);
+  const bar = el.querySelector<HTMLElement>('.bar i');
+  const txt = el.querySelector<HTMLElement>('p');
+  if (bar) bar.style.width = '100%';
+  if (txt) txt.textContent = 'Đang tải… 100%';
+  const node = el;
+  // the full bar shows a moment, then the screen fades out onto the game
+  setTimeout(() => {
+    node.classList.add('hide');
+    setTimeout(() => node.remove(), 450);
+  }, 180);
 }
 
 function cheatButton(onClick: () => void): void {
@@ -82,6 +116,7 @@ async function boot(): Promise<void> {
 
   if (!file && !room) {
     showHome(chapters, () => openCheat(chapters));
+    loading(false);
     return;
   }
 
@@ -89,6 +124,7 @@ async function boot(): Promise<void> {
   await app.init({ resizeTo: window, background: '#1d1b22', antialias: true, resolution: Math.min(2, window.devicePixelRatio || 1), autoDensity: true });
   document.getElementById('app')!.appendChild(app.canvas);
   loading(true);
+  loadingProgress(0.1);
   const [spriteMeta, spineMeta, layers] = await Promise.all([
     json<Record<string, SpriteMeta>>('sprites/meta.json'),
     json<Record<string, { scale: number }>>('spine/meta.json'),
@@ -99,12 +135,13 @@ async function boot(): Promise<void> {
     const ch = chapters.find((c) => c.code === room);
     const ovFile = mapping.chapters.find((c) => c.chapterNamecode === room)?.chapterFilename;
     const [ov, objects] = await Promise.all([ovFile ? json<LevelData>(`levels/${ovFile}.json`).catch(() => null) : null, json<Record<string, string>>('levels/objects.json').catch(() => ({}))]);
-    loading(false);
+    loadingProgress(0.2);
     const levelOf = Object.fromEntries(mapping.chapters.flatMap((c) => c.levels.map((l) => [l.levelNamecode, l.levelFilename])));
     // rooms without an overview prefab (Pool) use the chapter's before / after pictures
     const isOverview = !!ov?.nodes[0]?.comps.some((c) => c?.t === 'OverviewLevel');
-    if (ch) await showRoom({ app, ch, chapters, overview: isOverview ? ov : null, objects, levelOf, spriteMeta, spineMeta, layers, fresh: params.get('fresh') });
+    if (ch) await showRoom({ app, ch, chapters, overview: isOverview ? ov : null, objects, levelOf, spriteMeta, spineMeta, layers, fresh: params.get('fresh'), onLoad: (f) => loadingProgress(0.2 + 0.78 * f), ready: () => loading(false) });
     else location.href = './';
+    loading(false);
     cheatButton(() => openCheat(chapters));
     return;
   }
@@ -117,12 +154,13 @@ async function boot(): Promise<void> {
 
   const level = await json<LevelData>(`levels/${lv}.json`);
   // every clip the level uses, fetched and decoded now so sounds come right with the action
-  const clips = new Set(['Pick_Items', 'Item_Drop', 'Squirt', 'Slapping', 'Take_Item_1', 'Success_Long', 'Success_Magic', 'Hammer_Wood', 'Rubbing', 'Sweeping']);
+  const clips = new Set(['Pick_Items', 'Item_Drop', 'Squirt', 'Slapping', 'Take_Item_1', 'Success_Long', 'Success_Magic', 'Hammer_Wood', 'Rubbing', 'Sweeping', 'Peel', 'Peel_Tape', 'Soap_Loop', 'Water_Nozzle_Spray_1_Loop', 'Vacuum_Cleaner_Liquid']);
   for (const m of JSON.stringify(level).matchAll(/"audio":\s*"([^"]+)"/g)) clips.add(m[1]);
   preloadAudio(clips);
   const scene = new Scene(level, layers);
   scene.spriteMetaOf = (k) => spriteMeta[k];
-  await scene.build(spriteMeta, spineMeta);
+  loadingProgress(0.2);
+  await scene.build(spriteMeta, spineMeta, (f) => loadingProgress(0.2 + 0.78 * f));
   app.stage.addChild(scene.root);
   loading(false);
 
@@ -134,7 +172,7 @@ async function boot(): Promise<void> {
   }
 
   const rt = new Runtime(scene, app);
-  rt.onChoice = (obj, opt) => saveChoice(obj, opt);
+  rt.onChoice = (obj, opt, i) => saveChoice(lv, obj, opt, i);
   const hud = new Hud(app, info ? `${ROOM_VI[info.room] ?? info.room} · ${info.name}` : lv);
   rt.onStep = (n, i, total) => {
     hud.setStep(i, total);

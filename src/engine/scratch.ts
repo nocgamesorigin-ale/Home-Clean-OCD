@@ -231,6 +231,24 @@ export class ScratchCard {
     this.count = 0;
   }
 
+  private fadeSprite: Sprite | null = null;
+  private fadeRoot = new Container();
+
+  /** One frame of a soft finish: what is left of the job fades by `a` (0..1). */
+  fadeRest(a: number): void {
+    if (!this.rt) return;
+    if (!this.fadeSprite) {
+      this.fadeSprite = new Sprite(Texture.WHITE);
+      this.fadeRoot.addChild(this.fadeSprite);
+    }
+    const f = this.fadeSprite;
+    f.width = this.rt.width;
+    f.height = this.rt.height;
+    f.alpha = a;
+    f.blendMode = this.mode === 0 ? 'erase' : 'normal';
+    this.renderer.render({ container: this.fadeRoot, target: this.rt, clear: false });
+  }
+
   /** Finish the card: fully shown (fill) or fully gone (erase). */
   complete(): void {
     this.fill(this.mode === 0 ? 0 : 1);
