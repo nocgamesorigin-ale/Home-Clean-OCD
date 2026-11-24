@@ -294,6 +294,9 @@ function autoTest(rt: Runtime, scene: Scene): void {
         offscreen: [...rt.qa.offscreen].slice(0, 20),
         leftover: [...rt.qa.leftover].slice(0, 20),
         noFx: [...rt.qa.noFx].slice(0, 30),
+        frozen: [...rt.qa.frozen].slice(0, 30),
+        noToolUI: [...rt.qa.noToolUI],
+        covered: [...rt.qa.covered].slice(0, 60),
         // Spines whose skeleton lacks animations the level plays on them (wrong skeleton file)
         spineMismatch: [...new Set(scene.gos.filter((g) => g.spine).flatMap((g) => {
           const names = new Set(g.spine!.skeleton.data.animations.map((a) => a.name));

@@ -29,7 +29,7 @@ exported to JSON and replayed by a small runtime that implements the game's own 
 - `src/engine/behaviors.ts` — bone followers, insects, drop-in objects, highlight flashes.
 - `src/engine/fx.ts`, `ui.ts`, `audio.ts` — fallback effects + hand hint, option picker / tool bar / tool badge, sounds.
 - `public/data/` — exported game data: `levels/*.json`, `sprites/`, `spine/`, `fx/`, `audio/`, `story/`.
-- `tools/` — data tools: `tree.py` / `outline.py` (print a level's GameObject tree), `spine_export.py` +
+- `tools/` — data tools: `tree.py` / `outline.py` (print a level's GameObject tree), `refs.py` (every component that drives a GameObject), `spine_export.py` +
   `apply_spine_variants.py` (re-export Spine skeletons from the XAPK), `gen-asset.mjs` (Gemini).
 
 ## Rules

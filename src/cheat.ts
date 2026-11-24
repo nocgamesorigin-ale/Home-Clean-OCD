@@ -1,6 +1,6 @@
 // Cheat / test popup: jump to any level or step, finish steps, unlock everything.
 import type { Runtime } from './engine/runtime';
-import { progress, ROOM_VI, type Chapter } from './home';
+import { isOpen, progress, ROOM_VI, type Chapter } from './home';
 
 export function openCheat(chapters: Chapter[], rt?: Runtime): void {
   document.querySelector('.cheat')?.remove();
@@ -14,6 +14,7 @@ export function openCheat(chapters: Chapter[], rt?: Runtime): void {
       <h3>Màn hiện tại</h3>
       <div class="row">
         <button data-a="skip">Xong bước này</button>
+        <button data-a="clean"${rt.stepIndex >= rt.cleanEndIndex ? ' disabled' : ''}>Làm sạch xong${rt.cleanEndIndex < steps.length ? ` → ${rt.cleanEndIndex + 1}. ${steps[rt.cleanEndIndex].replace(/^TweenStep[-_]?/, '')}` : ''}</button>
         <button data-a="win">Xong cả màn</button>
         <button data-a="auto">${rt.autoPlay ? 'Tắt' : 'Bật'} tự chơi</button>
       </div>
@@ -27,6 +28,15 @@ export function openCheat(chapters: Chapter[], rt?: Runtime): void {
         <button data-a="doneall">Đánh dấu xong hết</button>
         <button data-a="reset">Xoá tiến trình</button>
       </div>
+      <h3>Mở khoá phòng</h3>
+      <div class="row rooms">${chapters
+        .map((c) => {
+          const on = progress.rooms().has(c.code);
+          const open = c.levels.some((l) => isOpen(chapters, l.file));
+          // tap: open every object of the room (tap again to undo the cheat)
+          return `<button data-room="${c.code}" class="${on ? 'on' : open ? 'open' : ''}">${on ? '🔓' : open ? '▶' : '🔒'} ${ROOM_VI[c.code] ?? c.code}</button>`;
+        })
+        .join('')}</div>
       <h3>Chơi thử đồ vật</h3>
       ${chapters
         .map(
@@ -52,6 +62,14 @@ export function openCheat(chapters: Chapter[], rt?: Runtime): void {
     } else if (rt && a === 'skip') {
       rt.fastForwardTo = rt.stepIndex + 1;
       close();
+    } else if (rt && a === 'clean') {
+      // clean the object at once; the decoration picks after it are played as usual
+      rt.fastForwardTo = Math.max(rt.stepIndex + 1, rt.cleanEndIndex);
+      if (rt.cleanEndIndex >= steps.length) rt.fastForwardTo = 1e9;
+      close();
+    } else if (b.dataset.room) {
+      progress.setRoom(b.dataset.room, !progress.rooms().has(b.dataset.room));
+      location.reload();
     } else if (rt && a === 'win') {
       rt.fastForwardTo = 1e9;
       close();

@@ -3,8 +3,8 @@
 // sorted like Unity's sorting (layer, order, SortingGroup), while its transform and
 // visibility still come from the GameObject hierarchy.
 import { Assets, Container, MaskFilter, Matrix, NineSliceSprite, Point, RenderLayer, Sprite, Texture, TilingSprite } from 'pixi.js';
-import { Spine } from '@esotericsoftware/spine-pixi-v8';
-import { isRef, num, type CompData, type LevelData, type NodeData, type Ref, type SpriteMeta } from './types';
+import { Physics, Spine } from '@esotericsoftware/spine-pixi-v8';
+import { isRef, num, refs, type CompData, type LevelData, type NodeData, type Ref, type SpriteMeta } from './types';
 import { FOAM_KEY } from './scratch';
 
 const BASE = import.meta.env.BASE_URL + 'data/';
@@ -31,6 +31,11 @@ export class GO {
   readonly view = new Container();
   sprite: Sprite | null = null;
   spine: Spine | null = null;
+  /**
+   * SkeletonRenderSeparator: the slots from the tool on are drawn by a second copy of the skeleton
+   * at their own sorting order (the tool over the object it works on), posed by the same state.
+   */
+  spinePart: { sp: Spine; slots: Set<string>; dOrder: number } | null = null;
   colliders: Collider[] = [];
   sortKey = 0;
   /** Unity sorting order of this renderer (changed by ReduceLayer). */
@@ -260,10 +265,31 @@ export class Scene {
         g.spine = sp;
         g.view.addChild(sp);
         this.layer.attach(sp);
+        this.separate(g, sk.skeleton, spineMeta);
       } catch (e) {
         console.warn('spine', sk.skeleton, e);
       }
     }
+  }
+
+  /** SkeletonRenderSeparator with parts at different orders: split the tool's slots off (see GO.spinePart). */
+  private separate(g: GO, skel: string, spineMeta: Record<string, { scale: number }>): void {
+    const sep = g.comp('SkeletonRenderSeparator');
+    const sp = g.spine;
+    if (!sep || !sp) return;
+    const orders = refs(sep.partsRenderers).map((r) => num(this.get(r)?.comp('MeshRenderer')?.order));
+    if (orders.length < 2 || orders[0] === orders[1]) return;
+    // the export lost the separator slot names: the split is at the first tool slot in draw order
+    const draw = sp.skeleton.drawOrder;
+    const at = draw.findIndex((sl) => TOOL_SLOT.test(sl.data.name));
+    if (at <= 0) return;
+    const sp2 = Spine.from({ skeleton: 'k:' + skel, atlas: 'a:' + skel, scale: spineMeta[skel]?.scale ?? 0.01, autoUpdate: false });
+    sp2.scale.y = -1;
+    g.view.addChild(sp2);
+    this.layer.attach(sp2);
+    g.order = orders[0];
+    g.spinePart = { sp: sp2, slots: new Set(draw.slice(at).map((sl) => sl.data.name)), dOrder: orders[1] - orders[0] };
+    syncSpinePart(g);
   }
 
   private animUse: Map<number, string[]> | null = null;
@@ -296,7 +322,16 @@ export class Scene {
   }
 
   /** Unity sorting: sorting layer, then order (SortingGroup first), then hierarchy order. */
+  /** Tie-break for equal layer/order: Unity draws the farther renderer (bigger z) first. */
+  private tieRank: Map<GO, number> | null = null;
+
   resort(): void {
+    if (!this.tieRank) {
+      const z = (g: GO): number => g.data.pos[2] + (g.parent ? z(g.parent) : 0);
+      const zs = new Map(this.gos.map((g) => [g, z(g)]));
+      const order = [...this.gos].sort((a, b) => zs.get(b)! - zs.get(a)! || a.id - b.id);
+      this.tieRank = new Map(order.map((g, i) => [g, i]));
+    }
     for (const g of this.gos) {
       const r = g.sprite ?? g.spine;
       if (!r) continue;
@@ -318,8 +353,10 @@ export class Scene {
         primary = li(g.layer) * 1e5 + g.order + 5e4;
         secondary = 0;
       }
-      g.sortKey = primary * 1e9 + secondary * 1e4 + g.id;
+      g.sortKey = primary * 1e9 + secondary * 1e4 + this.tieRank.get(g)!;
       r.zIndex = g.sortKey;
+      // the separated part: same rule at its own order
+      if (g.spinePart) g.spinePart.sp.zIndex = g.sortKey + g.spinePart.dOrder * (group ? 1e4 : 1e9);
     }
     this.layer.sortRenderLayerChildren();
   }
@@ -398,3 +435,27 @@ function sameBranch(a: GO, b: GO): boolean {
 }
 
 export { isRef };
+
+/** Slots of a tool (drawn above the object by SkeletonRenderSeparator). */
+const TOOL_SLOT = /shovel|screwdriver|peel_?tool|tweezer|scraper|wrench|hammer|pliers|tool/i;
+
+/** Pose the separated copy like the original; each copy shows only its own slots. */
+export function syncSpinePart(g: GO): void {
+  const part = g.spinePart;
+  const sp = g.spine;
+  if (!part || !sp) return;
+  const sk2 = part.sp.skeleton;
+  if (sk2.skin !== sp.skeleton.skin && sp.skeleton.skin) {
+    sk2.setSkin(sp.skeleton.skin);
+    sk2.setSlotsToSetupPose();
+  }
+  sk2.setToSetupPose();
+  sp.state.apply(sk2);
+  sk2.x = sp.skeleton.x;
+  sk2.y = sp.skeleton.y;
+  sk2.scaleX = sp.skeleton.scaleX;
+  sk2.scaleY = sp.skeleton.scaleY;
+  sk2.updateWorldTransform(Physics.update);
+  for (const sl of sp.skeleton.slots) if (part.slots.has(sl.data.name)) sl.color.a = 0;
+  for (const sl of sk2.slots) if (!part.slots.has(sl.data.name)) sl.color.a = 0;
+}

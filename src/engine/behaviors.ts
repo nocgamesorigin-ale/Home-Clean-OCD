@@ -52,6 +52,8 @@ export class Behaviors {
   private bugs: Bug[] = [];
   private drops: Drop[] = [];
   private flashes: Flash[] = [];
+  /** PositionConstraint: the object sits on its source. */
+  private follows: { go: GO; src: GO }[] = [];
 
   constructor(
     private readonly scene: Scene,
@@ -60,10 +62,18 @@ export class Behaviors {
     for (const g of scene.gos) {
       // SkeletonUtilityBone (follow mode) and BoneFollower: stick to a Spine bone
       const sub = g.comp('SkeletonUtilityBone');
-      if (sub && !num(sub.mode)) {
+      if (sub && sub.boneName) {
         const holder = scene.get(sub.hierarchy as Ref);
         const sp = holder?.spine ?? holder?.children.find((c) => c.spine)?.spine;
-        if (sp && sub.boneName) this.bones.push({ go: g, spine: sp, bone: sub.boneName as string, rot: !!sub.rotation });
+        if (sp && !num(sub.mode)) this.bones.push({ go: g, spine: sp, bone: sub.boneName as string, rot: !!sub.rotation });
+        // override mode: the GameObject drives the bone (a pipe end held by the finger…)
+        else if (sp && holder) {
+          this.overrideBone(sp, sub.boneName as string, g);
+          if (g.comp('PositionConstraint')) {
+            const src = constraintSource(scene, holder);
+            if (src) this.follows.push({ go: g, src });
+          }
+        }
       }
       const bf = g.comp('BoneFollower');
       if (bf) {
@@ -85,6 +95,22 @@ export class Behaviors {
       const dd = g.comp('DropDownObject');
       if (dd && dd.m_DropOnEnabled) this.drops.push({ go: g, data: dd, was: g.activeInHierarchy, t: -1, y1: g.view.position.y });
     }
+  }
+
+  /** SkeletonUtilityBone in override mode: each frame the bone is moved to its GameObject. */
+  private overrideBone(sp: Spine, name: string, g: GO): void {
+    const bone = sp.skeleton.findBone(name);
+    if (!bone) return;
+    const prev = sp.beforeUpdateWorldTransforms;
+    sp.beforeUpdateWorldTransforms = (o) => {
+      prev(o);
+      if (!g.activeInHierarchy) return;
+      const p = g.view.getGlobalPosition(new Point(), false);
+      const q = { x: p.x, y: p.y };
+      sp.pixiWorldCoordinatesToBone(q, bone);
+      bone.x = q.x;
+      bone.y = q.y;
+    };
   }
 
   private bugOf(g: GO): Bug | undefined {
@@ -133,6 +159,11 @@ export class Behaviors {
 
   update(dt: number): void {
     const world = this.scene.world;
+    for (const f of this.follows) {
+      if (!f.go.activeInHierarchy || !f.go.view.parent) continue;
+      const p = f.src.worldPos();
+      f.go.setWorldPos(p.x, p.y);
+    }
     for (const l of this.bones) {
       if (!l.go.activeInHierarchy) continue;
       const bone = l.spine.skeleton.findBone(l.bone);
@@ -207,4 +238,21 @@ export class Behaviors {
       }
     }
   }
+}
+
+/**
+ * The source of a PositionConstraint is lost in the export. The one known case is a Spine tool whose
+ * control bone follows a draggable handle: the script moves both together (MoveObjectIn with the
+ * Spine holder and the draggable in its list), so that draggable is taken as the source.
+ */
+function constraintSource(scene: Scene, holder: GO): GO | null {
+  for (const g of scene.gos)
+    for (const c of g.comps()) {
+      if (c.t !== 'MoveObjectIn') continue;
+      const objs = [c.m_GameObj, ...((c.m_ListGameObject as Ref[] | undefined) ?? [])].map((r) => scene.get(r as Ref));
+      if (!objs.includes(holder)) continue;
+      const d = objs.find((o) => o && o !== holder && o.comp('DraggableItem'));
+      if (d) return d;
+    }
+  return null;
 }

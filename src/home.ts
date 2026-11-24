@@ -30,6 +30,7 @@ const STORY: Record<string, { op?: string; ed?: string; opText: string; edText: 
 const DONE_KEY = 'home-clean-web.done';
 const SEEN_KEY = 'home-clean-web.story';
 const UNLOCK_KEY = 'home-clean-web.unlockAll';
+const ROOMS_KEY = 'home-clean-web.rooms';
 
 function readSet(k: string): Set<string> {
   try {
@@ -74,8 +75,17 @@ export const progress = {
       /* private mode */
     }
   },
+  /** Rooms opened by the cheat (all their objects playable). */
+  rooms: () => readSet(ROOMS_KEY),
+  setRoom(code: string, on: boolean): void {
+    const s = readSet(ROOMS_KEY);
+    if (on) s.add(code);
+    else s.delete(code);
+    writeSet(ROOMS_KEY, s);
+  },
   reset(): void {
     try {
+      localStorage.removeItem(ROOMS_KEY);
       localStorage.removeItem(DONE_KEY);
       localStorage.removeItem(SEEN_KEY);
       localStorage.removeItem(UNLOCK_KEY);
@@ -91,6 +101,8 @@ export const progress = {
 /** Levels open in order: a level opens when the one before it is done. */
 export function isOpen(chapters: Chapter[], file: string): boolean {
   if (progress.unlockAll()) return true;
+  const ch = chapterOf(chapters, file);
+  if (ch && progress.rooms().has(ch.code)) return true;
   const done = progress.done();
   const all = chapters.flatMap((c) => c.levels.map((l) => l.file));
   const i = all.indexOf(file);

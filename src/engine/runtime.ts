@@ -9,7 +9,8 @@
 // runs its children's actions the same way when its event fires.
 import { Assets, Graphics, Matrix, Point, Rectangle, type Application, type Texture } from 'pixi.js';
 import { play, stopLoops, type Voice } from './audio';
-import type { GO, Scene } from './scene';
+import { syncSpinePart, type GO, type Scene } from './scene';
+import type { Spine } from '@esotericsoftware/spine-pixi-v8';
 import { ScratchCard } from './scratch';
 import { isRef, num, refs, type CompData, type Ref } from './types';
 import { autoSolveMatch, ChooserUI, matchPairs, ToolBadge } from './ui';
@@ -24,6 +25,7 @@ const INTERACTIVE = new Set([
   'DragObjectMultipleSlot_ToolSwap', 'ScratchObject', 'ChooseOption', 'ChooseOptionTool', 'InteractiveMultiTool',
   'DragMultiObjectByDraggableItem', 'DragObjectMulti', 'DragObjectMulti2', 'DragObjectMultiInOrder', 'ClickObject',
   'ClickHold', 'CollectObject', 'SwipeObject', 'HoldToDoStuffObject', 'DragRotateObject', 'ChooseOptionByDraggableObject',
+  'DraggableItemScoopAndPour',
 ]);
 
 interface Drag {
@@ -93,6 +95,8 @@ export class Runtime {
   /** Step names of the level, and the one being played. */
   stepNames: string[] = [];
   stepIndex = 0;
+  /** First step after the cleaning: the level's closing decoration / style picks (stepNames.length = none). */
+  cleanEndIndex = 0;
   /** Cheat: play every step before this index automatically, at high speed. */
   fastForwardTo = -1;
   /** Cheat: let the game play itself. */
@@ -197,7 +201,11 @@ export class Runtime {
       if (on) this.shownBefore.add(g);
       else this.shownBefore.delete(g);
     }
-    for (const g of this.spines) if (g.activeInHierarchy) g.spine!.update(dt);
+    for (const g of this.spines)
+      if (g.activeInHierarchy) {
+        g.spine!.update(dt);
+        if (g.spinePart) syncSpinePart(g);
+      }
     if (this.hold && !this.hold.task.done) this.hold.task.onHold?.(dt, this.hold.p);
     this.fx.update(dt);
     for (const e of this.emitters.values()) e.update(dt, this.scene.world);
@@ -251,7 +259,58 @@ export class Runtime {
 
   /** QA (auto-test): problems a player would see, collected while the level plays. */
   qaOn = false;
-  readonly qa = { missingAnim: new Set<string>(), offscreen: new Set<string>(), leftover: new Set<string>(), noFx: new Set<string>() };
+  readonly qa = { missingAnim: new Set<string>(), offscreen: new Set<string>(), leftover: new Set<string>(), noFx: new Set<string>(), frozen: new Set<string>(), noToolUI: new Set<string>(), covered: new Set<string>() };
+
+  /** QA: the step (or a holder its components run) has a SetToolUIProgress tween. */
+  private hasToolUI(step: GO): boolean {
+    const seen = new Set<GO>();
+    const walk = (g: GO, depth: number): boolean => {
+      if (seen.has(g)) return false;
+      seen.add(g);
+      for (const c of g.comps()) {
+        if (c.t.startsWith('SetToolUIProgress')) return true;
+        if (depth < 3)
+          for (const [k, v] of Object.entries(c))
+            if (k !== 'm_TweenChecker' && k !== 'm_TweenOwner')
+              for (const r of refs(v)) {
+                const h = this.scene.get(r);
+                if (h && h !== g && !h.comp('DraggableItem') && walk(h, depth + 1)) return true;
+              }
+      }
+      return g.children.filter((o) => o.selfActive).some((o) => walk(o, depth));
+    };
+    return walk(step, 0);
+  }
+
+  /** QA: the tool, where it works, drawn under another picture that covers a good part of it. */
+  private qaCovered(it: GO): void {
+    const sub = new Set<GO>();
+    const add = (g: GO) => {
+      sub.add(g);
+      g.children.forEach(add);
+    };
+    add(it);
+    const rend = (g: GO) => (g.sprite?.visible !== false ? (g.sprite ?? g.spine) : g.spine);
+    const area = (r: { width: number; height: number }) => Math.max(0, r.width) * Math.max(0, r.height);
+    const mine = [...sub].filter((g) => g.activeInHierarchy && rend(g) && wAlpha(g.view) > 0.3);
+    for (const t of mine) {
+      const tr = rend(t)!;
+      const tb = tr.getBounds().rectangle;
+      const ta = area(tb);
+      if (ta < 4) continue;
+      for (const o of this.scene.gos) {
+        const or = rend(o);
+        if (!or || sub.has(o) || or.zIndex <= tr.zIndex || !o.activeInHierarchy || wAlpha(o.view) < 0.5 || or.alpha < 0.5) continue;
+        const ob = or.getBounds().rectangle;
+        const x0 = Math.max(tb.x, ob.x), x1 = Math.min(tb.x + tb.width, ob.x + ob.width);
+        const y0 = Math.max(tb.y, ob.y), y1 = Math.min(tb.y + tb.height, ob.y + ob.height);
+        const ov = area({ width: x1 - x0, height: y1 - y0 });
+        if (ov / ta > 0.3) this.qa.covered.add(`${this.stepName}: ${t.name}#${t.id} under ${o.name}#${o.id} (${Math.round((ov / ta) * 100)}%)`);
+      }
+    }
+  }
+  /** QA: spines the script just played (checked a second later). */
+  private qaPlayed = new Map<GO, { t: number; name: string }>();
   private qaT = 0;
   private qaTools = new Set<GO>();
   private qaSeen = new Map<GO, { x: number; y: number; t: number }>();
@@ -268,6 +327,18 @@ export class Runtime {
     for (const t of this.tasks)
       if (t.items.length && this.time - (t.born ?? this.time) > 4 && !t.items.some((i) => i.activeInHierarchy && inView(i)))
         this.qa.offscreen.add(`${this.stepName}: ${t.kind} ${t.items.map((i) => i.name).join(',')}`);
+    // an animation the script started that does not move on screen (held track, paused state, hidden)
+    for (const [g, p] of this.qaPlayed) {
+      if (this.time - p.t < 1) continue;
+      this.qaPlayed.delete(g);
+      // hidden by the script since (the last hit takes the rock away): nothing to see
+      if (!g.activeInHierarchy) continue;
+      const sp = g.spine!;
+      const tr = sp.state.tracks[0];
+      const moving = sp.state.timeScale > 0 && !!tr && tr.timeScale > 0 && (tr.trackTime > 0.05 || tr.isComplete());
+      if (!moving) this.qa.frozen.add(`${this.stepName}: ${g.name} [${p.name}] ts=${sp.state.timeScale}/${tr?.timeScale ?? '-'}`);
+      else if (!inView(g)) this.qa.frozen.add(`${this.stepName}: ${g.name} [${p.name}] off screen`);
+    }
     // tools that return to base, done with, still standing in the picture
     const busy = new Set(this.tasks.flatMap((t) => t.items));
     for (const g of this.qaTools) {
@@ -329,6 +400,7 @@ export class Runtime {
     const steps: GO[] = [];
     for (const seq of sm.children) if (seq.comp('TweenSequence') && seq.selfActive) for (const st of seq.children) if (st.comp('TweenStep') && st.selfActive) steps.push(st);
     this.stepNames = steps.map((s) => s.name);
+    this.cleanEndIndex = cleanEnd(steps);
     for (let i = 0; i < steps.length; i++) {
       this.stepIndex = i;
       this.stepName = steps[i].name;
@@ -339,11 +411,15 @@ export class Runtime {
       this.stepDoneKeys = new Set();
       this.stepProgress = this.stepKeys.size ? 0 : 1;
       const before = this.visualState();
+      // QA: a step whose original shows the tool thumbnail must show it here too
+      const wantUI = this.qaOn && this.hasToolUI(steps[i]);
+      let uiSeen = false;
       // QA: anything seen changing while the step runs (a drop-in that lands back counts)
       const seen = new Set<number>();
       let sampleT = 0;
       let stepDone = false;
       this.every((dt) => {
+        if (this.badge.shown) uiSeen = true;
         if ((sampleT += dt) >= 0.2) {
           sampleT = 0;
           for (const k of this.diffIds(before, false)) seen.add(k);
@@ -351,6 +427,7 @@ export class Runtime {
         return stepDone;
       });
       await this.runList(steps[i].children);
+      if (wantUI && !uiSeen && !this.badge.shown) this.qa.noToolUI.add(steps[i].name);
       this.stepProgress = 1;
       await this.sleep(0.6);
       stepDone = true;
@@ -571,7 +648,9 @@ export class Runtime {
           }
           if (c.SetToSetupPoseEachTime) sp.skeleton.setToSetupPose();
           sp.state.timeScale = num(c.timeScale, 1);
+          runtimePaused.delete(sp);
           const e = sp.state.setAnimation(0, name, !!c.isLoop);
+          if (this.qaOn) this.qaPlayed.set(o, { t: this.time, name });
           const add = c.anim_name_additional as string;
           if (add && sp.skeleton.data.findAnimation(add)) sp.state.addAnimation(0, add, !!c.isLoop_AdditionalAnim, 0);
           if (c.DisableOnDone) e.listener = { complete: () => o.setActive(false) };
@@ -587,7 +666,11 @@ export class Runtime {
             this.qa.missingAnim.add(`${o.name}:${s.name}`);
             return;
           }
-          if (i === 0) sp.state.setAnimation(s.track ?? 0, s.name, !!s.loop);
+          if (i === 0) {
+            resumeSpine(sp);
+            sp.state.setAnimation(s.track ?? 0, s.name, !!s.loop);
+            if (this.qaOn) this.qaPlayed.set(o, { t: this.time, name: s.name });
+          }
           else sp.state.addAnimation(s.track ?? 0, s.name, !!s.loop, 0);
         });
         return;
@@ -754,7 +837,13 @@ export class Runtime {
       }
       case 'SetTimescaleAnimation': {
         const sp = this.scene.get(c.m_SkeletionAnimation as Ref)?.spine;
-        if (sp) sp.state.timeScale = num(c.m_TimeScale, 1);
+        if (sp) {
+          const ts = num(c.m_TimeScale, 1);
+          sp.state.timeScale = ts;
+          runtimePaused.delete(sp);
+          // a spine held on its first frame (its settings were lost in the export) starts playing now
+          if (ts > 0) for (const tr of sp.state.tracks) if (tr && tr.timeScale === 0) tr.timeScale = 1;
+        }
         return;
       }
       case 'StopAnimationForce': {
@@ -930,6 +1019,8 @@ export class Runtime {
   private multiProgress = new Map<string, number>();
   /** TriggerTweenOnThreshold counters. */
   private thresholds = new Map<string, number>();
+  /** ManualTweenQueue -> index of its next step. */
+  private queueAt = new Map<number, number>();
 
   /** Unity events (UnityEvent persistent calls) of RemoteEvent / CallTweenFunction. */
   private invoke(ev: unknown): void {
@@ -968,7 +1059,11 @@ export class Runtime {
           break;
         }
         case 'DoStartStep': {
-          const st = tg.children[num(arg.m_IntArgument)];
+          // ManualTweenQueue.DoStartStep(): each call plays the queue's next step (glass cracks a bit more per hit)
+          const steps = tg.children.filter((o) => o.selfActive);
+          const i = this.queueAt.get(tg.id) ?? 0;
+          this.queueAt.set(tg.id, i + 1);
+          const st = steps[i];
           if (st) void this.runList(st.children);
           break;
         }
@@ -1134,6 +1229,53 @@ export class Runtime {
           const r = this.rect(t);
           return this.scene.world.toLocal(new Point(r.x + r.width / 2, r.y + r.height / 2));
         });
+        return task;
+      }
+      case 'DraggableItemScoopAndPour': {
+        // chopsticks / scoop: touch a thing to pick it up (TweenScoop), carry it to its target (TweenPour)
+        const it = this.item(c.m_DragItem);
+        const objs = refs(c.m_ListScoopAndPourObj).map((r) => this.scene.get(r)).filter((o): o is GO => !!o);
+        if (!it || !objs.length) return null;
+        const sp = (o: GO) => o.comp('ScoopAndPourObject')!;
+        const targetOf = (o: GO) => this.scene.get(sp(o).m_TargetCollider as Ref);
+        const done = new Set<GO>();
+        let held: GO | null = null;
+        const centre = (o: GO) => {
+          const r = this.rect(o);
+          return this.scene.world.toLocal(new Point(r.x + r.width / 2, r.y + r.height / 2));
+        };
+        task.items = [it];
+        task.progress = () => done.size / objs.length;
+        task.onMove = (m) => {
+          if (!held) {
+            const o = objs.find((x) => !done.has(x) && x.activeInHierarchy && this.overlap(m, x));
+            if (!o) return;
+            held = o;
+            play('Pick_Items');
+            void this.runHolder(sp(o).m_TweenScoop);
+            return;
+          }
+          const tg = targetOf(held);
+          if (tg && this.overlap(m, tg)) {
+            const o = held;
+            held = null;
+            done.add(o);
+            play('Item_Drop');
+            void this.runHolder(sp(o).m_TweenPour).then(() => {
+              this.runRefs(c.m_TweenOnDone);
+              if (done.size >= objs.length) task.finish();
+            });
+          }
+        };
+        // let go: the tool goes back and keeps what it holds
+        task.onRelease = () => false;
+        task.goals = () => {
+          const tg = held && targetOf(held);
+          if (held) return tg ? [centre(tg)] : [];
+          const o = objs.find((x) => !done.has(x) && x.activeInHierarchy);
+          const t2 = o && targetOf(o);
+          return o ? [centre(o), ...(t2 ? [centre(t2)] : [])] : [];
+        };
         return task;
       }
       case 'DragObject': {
@@ -1306,6 +1448,8 @@ export class Runtime {
         const cards = refs(c.m_ListScratchCard).map((r) => this.cards.get(key(r))).filter((x): x is ScratchCard => !!x);
         if (!it || !cards.length) return null;
         for (const k of cards) k.go.setActive(true);
+        // OnStartScratch: the tool's thumbnail + progress UI (SetToolUIProgress…)
+        void this.runHolder(c.m_OnStartScratch);
         const need = (k: ScratchCard) => (k.mode === 0 ? num(c.m_FillRateErase, 0.7) : 1 - num(c.m_FillRateRestore, 0.3));
         let half = false;
         task.items = [it];
@@ -1942,7 +2086,7 @@ export class Runtime {
           voice = null;
           stopPs();
           started = false;
-          if (sp) sp.state.timeScale = 0;
+          if (sp) pauseSpine(sp);
           void this.runHolder(c.m_TweenReleaseHolder);
         };
         task.taps = () => [area.worldPos()];
@@ -2104,7 +2248,7 @@ export class Runtime {
           }
         };
         task.onHoldEnd = () => {
-          if (sp) sp.state.timeScale = 0;
+          if (sp) pauseSpine(sp);
         };
         task.taps = () => [area ? this.centre(area) : new Point()];
         (task as Task & { holdArea?: GO }).holdArea = area ?? undefined;
@@ -2268,6 +2412,8 @@ export class Runtime {
   }
 
   /** After a few idle seconds, show the hand on the first thing the player can do. */
+  private hintTask: Task | null = null;
+
   private updateHint(dt: number): void {
     const busy = !!this.drag || !!this.hold || this.ui.busy;
     this.idle = busy ? 0 : this.idle + dt;
@@ -2275,6 +2421,8 @@ export class Runtime {
       if (this.hint.shown) this.hint.hide();
       return;
     }
+    // a hint belongs to its task: once that task is over (next step) point again
+    if (this.hint.shown && (!this.hintTask || this.hintTask.done || !this.tasks.includes(this.hintTask))) this.hint.hide();
     this.hint.update(dt, this.scene.world.scale.x);
     if (this.hint.shown) return;
     const k = this.scene.world.scale.x;
@@ -2291,11 +2439,13 @@ export class Runtime {
         // point at a spot still to do (a scratch card's sweep starts at a bare corner)
         const goal = t.left?.()[0] ?? t.goals?.()[0];
         this.hint.show(this.centre(it), goal ?? null);
+        this.hintTask = t;
         return;
       }
       const tap = t.items.length ? undefined : t.taps?.()[0];
       if (tap) {
         this.hint.show(tap, null);
+        this.hintTask = t;
         return;
       }
     }
@@ -2750,7 +2900,8 @@ export class Runtime {
       if (start && name && sp.skeleton.data.findAnimation(name)) {
         sp.state.timeScale = 1;
         sp.state.setAnimation(0, name, di.isLoopAnimSpine !== 0);
-      } else if (!start) sp.state.timeScale = 0;
+      } else if (!start && (!name || sp.state.tracks[0]?.animation?.name === name)) pauseSpine(sp);
+      // (let go: the drag loop stops; an animation the drop's own script started keeps playing)
     }
     const once = ((start ? di.m_AudioOnStartDrag : di.m_AudioOnEndDrag) as { audio?: string } | undefined)?.audio;
     if (once) play(once);
@@ -2913,11 +3064,14 @@ export class Runtime {
       if (!it) continue;
       const start = it.worldPos();
       this.drag = { item: it, task: t, grab: new Point(), start, moved: 0 };
-      for (const goal of t.goals?.() ?? []) {
+      const goals = t.goals?.() ?? [];
+      const probe = new Set([0, goals.length >> 1, goals.length - 1]);
+      for (const [gi, goal] of goals.entries()) {
         const tp = this.toolPoint(it);
         const ip = it.worldPos();
         it.setWorldPos(goal.x - (tp.x - ip.x), goal.y - (tp.y - ip.y));
         t.onMove?.(it);
+        if (this.qaOn && probe.has(gi)) this.qaCovered(it);
         if (t.done) break;
       }
       if (!t.done && this.drag) {
@@ -2928,6 +3082,44 @@ export class Runtime {
       this.drag = null;
     }
   }
+}
+
+/** Alpha a container is drawn with (its own times its parents'). */
+function wAlpha(c: { alpha: number; parent: unknown }): number {
+  let a = 1;
+  for (let p: { alpha: number; parent: unknown } | null = c; p; p = p.parent as typeof p) a *= p.alpha;
+  return a;
+}
+
+/** Spines the web runtime paused itself (tool let go, hold released), not the level's script. */
+const runtimePaused = new WeakSet<Spine>();
+
+function pauseSpine(sp: Spine): void {
+  sp.state.timeScale = 0;
+  runtimePaused.add(sp);
+}
+
+/** The script plays an animation: a pause the runtime made must not hold it. */
+function resumeSpine(sp: Spine): void {
+  if (runtimePaused.has(sp)) {
+    sp.state.timeScale = 1;
+    runtimePaused.delete(sp);
+  }
+}
+
+/**
+ * Where the cleaning ends: the start of the level's closing decoration block (the last style pick, with
+ * the picks and task-less steps right before it). Steps after the block still play. No pick = the end.
+ */
+function cleanEnd(steps: GO[]): number {
+  const comps = (st: GO) => st.children.filter((o) => o.selfActive).flatMap((o) => o.comps().filter((c) => c.m_Enabled !== 0));
+  const deco = (st: GO) => comps(st).some((c) => c.t === 'ChooseOption' || c.t === 'DropEffectDeco');
+  const idle = (st: GO) => !comps(st).some(isTask);
+  let i = steps.length - 1;
+  while (i >= 0 && !deco(steps[i])) i--;
+  if (i < 0) return steps.length;
+  while (i > 0 && (deco(steps[i - 1]) || idle(steps[i - 1]))) i--;
+  return i;
 }
 
 /** Interactive tasks hold the step; every one of them has an m_IsDone flag. */
